@@ -9,6 +9,4 @@ Checks: >
 
 WarningsAsErrors: ''
 HeaderFilterRegex: '.*'
-AnalyzeTemporaryDtors: true
 FormatStyle: file
-User: {}
