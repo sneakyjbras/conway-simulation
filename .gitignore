@@ -1,0 +1,79 @@
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- Editors/IDEs ---
+.vscode/
+.idea/
+*.code-workspace
+
+# clangd / ccls caches
+.clangd/
+.ccls-cache/
+
+# --- Python virtualenvs (if you test scripts) ---
+.venv/
+venv/
+
+# --- Build directories (out-of-source CMake builds) ---
+/build/
+/build-* /cmake-build-*/
+
+# --- CMake generated files (if someone builds in-tree by mistake) ---
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# Ninja/Make artifacts
+.ninja_deps
+.ninja_log
+
+# --- Compilers / linkers ---
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.i*      # preprocessed files
+*.s       # assembly outputs
+*.su
+*.pdb
+*.idb
+*.ilk
+*.exp
+*.map
+
+# --- Coverage / profiling ---
+*.gcda
+*.gcno
+*.gcov
+*.prof
+*.profraw
+*.profdata
+
+# --- Crash dumps ---
+core
+*.core
+*.stackdump
+
+# --- Project-specific binaries ---
+/life3d
+
+# --- Generated archives from earlier helper uploads ---
+/life3d_cpp_starter.zip
+/life3d_cpp_starter_with_run.zip
+/life3d_cpp_stdprint.zip
