@@ -53,7 +53,7 @@ mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
 echo "[run.sh] Configuring (CMAKE_BUILD_TYPE=${BUILD_TYPE})..."
-cmake -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" ..
+cmake -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
 
 echo "[run.sh] Building with ${THREADS} threads..."
 cmake --build . -j "${THREADS}"

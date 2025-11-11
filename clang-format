@@ -1,0 +1,12 @@
+BasedOnStyle: LLVM
+Standard: Cpp23
+IndentWidth: 2
+ColumnLimit: 120
+UseTab: Never
+SortIncludes: true
+IncludeBlocks: Regroup
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+NamespaceIndentation: None
+AlignConsecutiveAssignments: Consecutive
+PointerAlignment: Left

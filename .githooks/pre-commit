@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — format (clang-format) and lint (clang-tidy) C/C++ before commit.
+# Usage: install once with:
+#   git config core.hooksPath .githooks
+#
+# Env knobs:
+#   TIDY_BUILD_DIR=build          # where compile_commands.json lives (default: build)
+#   SKIP_TIDY=1                   # skip clang-tidy
+#   CLANG_TIDY_WARN_AS_ERR=1      # treat tidy warnings as errors
+#   CLANG_FORMAT_BIN=clang-format # override tool names/paths
+#   CLANG_TIDY_BIN=clang-tidy
+#
+set -euo pipefail
+
+# Collect staged C/C++ files
+mapfile -t FILES < <(git diff --cached --name-only --diff-filter=ACMRT |   grep -E '\.(c|cc|cp|cpp|cxx|h|hh|hpp|hxx)$' || true)
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+CLANG_FORMAT_BIN="${CLANG_FORMAT_BIN:-clang-format}"
+CLANG_TIDY_BIN="${CLANG_TIDY_BIN:-clang-tidy}"
+BUILD_DIR="${TIDY_BUILD_DIR:-build}"
+
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+echo "[pre-commit] Formatting with ${CLANG_FORMAT_BIN}…"
+if ! has_cmd "${CLANG_FORMAT_BIN}"; then
+  echo "[pre-commit] ERROR: ${CLANG_FORMAT_BIN} not found." >&2
+  exit 1
+fi
+
+# Format in-place, then re-stage any changed files
+for f in "${FILES[@]}"; do
+  [[ -f "$f" ]] || continue
+  "${CLANG_FORMAT_BIN}" -i "$f"
+  git add "$f"
+done
+
+if [[ "${SKIP_TIDY:-0}" == "1" ]]; then
+  echo "[pre-commit] SKIP_TIDY=1 — skipping clang-tidy."
+  exit 0
+fi
+
+if ! has_cmd "${CLANG_TIDY_BIN}"; then
+  echo "[pre-commit] WARNING: ${CLANG_TIDY_BIN} not found — skipping lint."
+  exit 0
+fi
+
+if [[ ! -f "${BUILD_DIR}/compile_commands.json" ]]; then
+  echo "[pre-commit] NOTE: ${BUILD_DIR}/compile_commands.json not found."
+  echo "  Generate it with: cmake -S . -B ${BUILD_DIR} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" >&2
+  exit 1
+fi
+
+echo "[pre-commit] Linting with ${CLANG_TIDY_BIN} (database: ${BUILD_DIR}/compile_commands.json)…"
+FAILED=0
+WARN_AS_ERR=${CLANG_TIDY_WARN_AS_ERR:-0}
+
+for f in "${FILES[@]}"; do
+  [[ -f "$f" ]] || continue
+  # Run clang-tidy using compile commands; respect .clang-tidy in repo root.
+  if [[ "${WARN_AS_ERR}" == "1" ]]; then
+    "${CLANG_TIDY_BIN}" -p "${BUILD_DIR}" -warnings-as-errors='*' "$f" || FAILED=1
+  else
+    "${CLANG_TIDY_BIN}" -p "${BUILD_DIR}" "$f" || FAILED=1
+  fi
+done
+
+if [[ "${FAILED}" -ne 0 ]]; then
+  echo "[pre-commit] clang-tidy found issues. Commit aborted." >&2
+  echo "  Tip: set CLANG_TIDY_WARN_AS_ERR=1 to enforce warnings as errors, or SKIP_TIDY=1 to bypass." >&2
+  exit 1
+fi
+
+echo "[pre-commit] OK."
+exit 0
