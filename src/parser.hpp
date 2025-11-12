@@ -8,8 +8,8 @@
 struct SimulationConfig {
   std::uint32_t number_of_generations;
   std::uint32_t grid_dimension;
-  double initial_density;
-  std::uint32_t random_seed;
+  float initial_density;
+  std::int32_t random_seed;
 };
 
 class CommandLineParser {

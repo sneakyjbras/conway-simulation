@@ -56,8 +56,8 @@ auto CommandLineParser::parse(std::span<char* const> raw_arguments) -> std::expe
 
   auto parsed_generations    = parse_scalar<std::uint32_t>(generations_arg);
   auto parsed_grid_dimension = parse_scalar<std::uint32_t>(grid_dim_arg);
-  auto parsed_density        = parse_scalar<double>(density_arg);
-  auto parsed_seed           = parse_scalar<std::uint32_t>(seed_arg);
+  auto parsed_density        = parse_scalar<float>(density_arg);
+  auto parsed_seed           = parse_scalar<std::int32_t>(seed_arg);
 
   if (!parsed_generations) {
     return std::unexpected("Invalid <generations>: " + parsed_generations.error());
@@ -74,8 +74,8 @@ auto CommandLineParser::parse(std::span<char* const> raw_arguments) -> std::expe
 
   const std::uint32_t number_of_generations = *parsed_generations;
   const std::uint32_t grid_dimension        = *parsed_grid_dimension;
-  const double initial_density              = *parsed_density;
-  const std::uint32_t random_seed           = *parsed_seed;
+  const float initial_density               = *parsed_density;
+  const std::int32_t random_seed            = *parsed_seed;
 
   if (number_of_generations < kMinimumPositive) {
     return std::unexpected("<generations> must be >= 1");
