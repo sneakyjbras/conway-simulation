@@ -1,42 +1,53 @@
 #pragma once
+
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
-// Bindings to the C generator (verbatim from Appendix A).
-extern "C" {
-#define N_SPECIES 9
-void init_r4uni(int input_seed);
-float r4_uni(void);
-char ***gen_initial_grid(int N, float density, int input_seed);
-}
+// Number of species (replaces the old macro)
+inline constexpr std::size_t N_SPECIES = 9;
+
+auto r4_uni(std::uint32_t& state) -> float;
+
+// Keep the legacy return type to avoid wider refactors, but modernize naming and style.
+auto gen_initial_grid(int grid_dimension, float density, int input_seed) -> char***;
 
 class Simulation {
 public:
-  Simulation(int generations, int N, float density, int seed);
+  Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed);
   ~Simulation();
 
-  // Run the G timesteps. You will implement the serial algorithm here.
-  void run();
+  Simulation(const Simulation&)                        = delete;
+  auto operator=(const Simulation&) -> Simulation&     = delete;
+  Simulation(Simulation&&) noexcept                    = default;
+  auto operator=(Simulation&&) noexcept -> Simulation& = default;
 
-  // Print exactly 9 lines to stdout using std::print/std::println.
-  void print_results() const;
+  auto run() -> void;
+  auto print_results() const -> void;
 
 private:
-  int generations_;
-  int N_;
-  float density_;
-  int seed_;
+  // Parameters
+  int generations_{};
+  int grid_dimension_{};
+  float density_{};
+  int seed_{};
 
-  // Flat 0..9 grid (size N^3). 0 = dead, 1..9 = species.
-  std::vector<std::uint8_t> grid_;
+  // Grid stored as a flat vector (no raw C arrays).
+  // Values in [0, N_SPECIES]; 0 means empty.
+  std::vector<unsigned char> grid_;
 
-  // Per-species maxima (index 1..9 used)
-  std::uint64_t max_count_[N_SPECIES + 1]{};
-  int max_gen_[N_SPECIES + 1]{};
+  // Stats
+  std::array<std::uint64_t, N_SPECIES + 1> max_count_{};
+  std::array<int, N_SPECIES + 1> max_gen_{};
 
-  // Helper: convert the C generator’s char*** to flat vector, then free it.
-  void init_from_generator();
+  // Helpers
+  static auto free_grid(char*** grid, int grid_dimension) -> void;
 
-  // Free the C 3D structure allocated by gen_initial_grid
-  static void free_grid(char ***g, int N);
+  [[nodiscard]] auto index_3d(int coordinate_x, int coordinate_y, int coordinate_z) const -> std::size_t;
+
+  [[nodiscard]] auto neighbors_count(int coordinate_x, int coordinate_y, int coordinate_z, unsigned char species) const
+      -> int;
+
+  auto initialize_from_generator() -> void;
 };

@@ -14,6 +14,7 @@ find_package(OpenMP REQUIRED)
 
 add_executable(life3d
   src/main.cpp
+  src/parser.cpp
   src/simulation.cpp
   src/generator.c  # compiled as C (verbatim generator)
 )
