@@ -21,6 +21,7 @@ private:
   std::size_t index_3d(int x, int y, int z) const;
   void initialize_from_generator();
   int total_alive_neighbors(int x, int y, int z) const;
+  int total_alive_neighbors(int x, int y, int z, std::array<int, generator::N_SPECIES + 1>* species_counts) const;
 
   int generations_;
   int grid_dimension_;
