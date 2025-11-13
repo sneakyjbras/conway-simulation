@@ -6,8 +6,8 @@
 #include <string_view>
 
 struct SimulationConfig {
-  std::uint32_t number_of_generations;
-  std::uint32_t grid_dimension;
+  std::uint64_t number_of_generations;
+  std::uint64_t grid_dimension;
   float initial_density;
   std::int32_t random_seed;
 };

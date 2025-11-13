@@ -72,8 +72,8 @@ auto CommandLineParser::parse(std::span<char* const> raw_arguments) -> std::expe
     return std::unexpected("Invalid <seed>: " + parsed_seed.error());
   }
 
-  const std::uint32_t number_of_generations = *parsed_generations;
-  const std::uint32_t grid_dimension        = *parsed_grid_dimension;
+  const std::uint64_t number_of_generations = *parsed_generations;
+  const std::uint64_t grid_dimension        = *parsed_grid_dimension;
   const float initial_density               = *parsed_density;
   const std::int32_t random_seed            = *parsed_seed;
 
