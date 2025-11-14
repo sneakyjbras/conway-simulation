@@ -1,4 +1,3 @@
-// simulation.hpp
 #pragma once
 
 #include "debug_printer.hpp"
@@ -16,15 +15,16 @@ public:
   void run();
   void print_results() const;
 
-  // NEW: enable/disable debug printing
-  void set_debug(bool enabled) noexcept {
-    debug_printer_.enable(enabled);
-  }
-
 private:
   std::size_t index_3d(int x, int y, int z) const;
   void initialize_from_generator();
-  // If you already have this signature, keep it exactly the same:
+
+  // Specialized neighbor-counting helpers (alive vs. dead cells).
+  int alive_neighbors_total(int x, int y, int z) const;
+  int alive_neighbors_with_species(int x, int y, int z,
+                                   std::array<int, generator::N_SPECIES + 1>& species_counts) const;
+
+  // Backwards-compatible wrappers.
   int total_alive_neighbors(int x, int y, int z, std::array<int, generator::N_SPECIES + 1>* per_species) const;
   int total_alive_neighbors(int x, int y, int z) const;
 
@@ -35,9 +35,12 @@ private:
 
   std::vector<unsigned char> grid_;
 
+  // Cached wrap-around info for faster toroidal indexing.
+  bool use_bitmask_wrap_{false};
+  int wrap_mask_{0};
+
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_count_{};
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_gen_{};
 
-  // NEW:
-  DebugPrinter debug_printer_{false};
+  DebugPrinter debug_printer_;
 };
