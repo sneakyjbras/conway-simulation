@@ -46,6 +46,17 @@ int Simulation::total_alive_neighbors(int x, int y, int z,
   int total   = 0;
   const int n = grid_dimension_;
 
+  // Early-exit logic:
+  // - Alive cell  (species_counts == nullptr):
+  //     survival rule is 5–13 neighbors, so if we ever see > 13 neighbors,
+  //     the cell will die and we don't need an exact count.
+  //
+  // - Dead cell   (species_counts != nullptr):
+  //     birth rule is 7–10 neighbors, so if we ever see > 10 neighbors,
+  //     the cell cannot be born and we don't need an exact count nor full
+  //     per-species statistics.
+  const int early_exit_limit = (species_counts == nullptr) ? 13 : 10;
+
   for (int dz = -1; dz <= 1; ++dz) {
     int nz = z + dz;
     if (nz < 0)
@@ -79,6 +90,12 @@ int Simulation::total_alive_neighbors(int x, int y, int z,
 
           if (species_counts != nullptr) {
             (*species_counts)[static_cast<std::size_t>(species)]++;
+          }
+
+          // Once we exceed the relevant limit, we already know the outcome
+          // for this cell, so no need to keep counting.
+          if (total > early_exit_limit) {
+            return total;
           }
         }
       }
