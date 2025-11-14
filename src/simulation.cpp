@@ -1,7 +1,7 @@
 // simulation.cpp - C++23
 #include "simulation.hpp"
 
-#include <iostream>
+#include <print> // changed from <iostream>
 
 Simulation::Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed)
     : generations_(number_of_generations), grid_dimension_(grid_dimension), density_(initial_density),
@@ -170,7 +170,6 @@ void Simulation::run() {
 
 void Simulation::print_results() const {
   for (int s = 1; s <= generator::N_SPECIES; ++s) {
-    std::cout << s << ' ' << max_count_[static_cast<std::size_t>(s)] << ' ' << max_gen_[static_cast<std::size_t>(s)]
-              << '\n';
+    std::println("{} {} {}", s, max_count_[static_cast<std::size_t>(s)], max_gen_[static_cast<std::size_t>(s)]);
   }
 }

@@ -27,12 +27,12 @@ int main(int argc, char* argv[]) {
     simulation.run();
     wtime += omp_get_wtime();
 
-    std::print(stderr, "{:.1f}s\n", wtime);
+    std::println(stderr, "{:.1f}s", wtime);
     simulation.print_results();
     return EXIT_SUCCESS;
 
   } catch (const std::exception& e) {
-    std::print(stderr, "Unhandled exception in main: {}\n", e.what());
+    std::println(stderr, "Unhandled exception in main: {}", e.what());
     return EXIT_FAILURE;
   }
 }
