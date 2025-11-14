@@ -23,7 +23,7 @@ void DebugPrinter::print_generation(int generation, const std::vector<unsigned c
 
       for (int x = 0; x < n; ++x) {
         const std::size_t idx =
-            (static_cast<std::size_t>(z) * N + static_cast<std::size_t>(y)) * N + static_cast<std::size_t>(x);
+            (static_cast<std::size_t>(x) * N + static_cast<std::size_t>(y)) * N + static_cast<std::size_t>(z);
 
         const unsigned char v = grid[idx];
 

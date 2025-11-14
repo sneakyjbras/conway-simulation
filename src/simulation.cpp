@@ -30,9 +30,9 @@ std::size_t Simulation::index_3d(int x, int y, int z) const {
 void Simulation::initialize_from_generator() {
   // Get a temporary grid from the generator, copy it into our flat vector, then free it.
   char*** g = generator::gen_initial_grid(grid_dimension_, density_, seed_);
-  for (int x = 0; x < grid_dimension_; ++x) {
+  for (int z = 0; z < grid_dimension_; ++z) {
     for (int y = 0; y < grid_dimension_; ++y) {
-      for (int z = 0; z < grid_dimension_; ++z) {
+      for (int x = 0; x < grid_dimension_; ++x) {
         grid_[index_3d(x, y, z)] = static_cast<unsigned char>(g[x][y][z]);
       }
     }
@@ -97,11 +97,12 @@ void Simulation::run() {
   // Allocate once; we just overwrite contents every generation.
   std::vector<unsigned char> next(grid_.size());
 
-  for (int gen = 0; gen < generations_; ++gen) {
+  // initialize number of generations
+  for (int gen = 0; gen <= generations_; ++gen) {
     // Print current state before evolving to next generation
     debug_printer_.print_generation(gen, grid_, grid_dimension_);
 
-    // Per-generation counts for maxima tracking
+    // Per-generation counts for maxima tracking (of the *current* generation)
     std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
     counts.fill(0);
 
@@ -110,6 +111,11 @@ void Simulation::run() {
         for (int x = 0; x < grid_dimension_; ++x) {
           const auto idx     = index_3d(x, y, z);
           const auto current = grid_[idx];
+
+          // Count the current generation’s species BEFORE computing the next one.
+          if (current != static_cast<unsigned char>(0)) {
+            counts[static_cast<std::size_t>(current)]++;
+          }
 
           unsigned char new_value = 0;
 
@@ -154,15 +160,11 @@ void Simulation::run() {
           }
 
           next[idx] = new_value;
-
-          if (new_value != static_cast<unsigned char>(0)) {
-            counts[static_cast<std::size_t>(new_value)]++;
-          }
         }
       }
     }
 
-    // Update maxima per species for this generation
+    // Update maxima per species based on the *current* generation (pre-evolution)
     const auto max_species = static_cast<std::size_t>(generator::N_SPECIES);
     for (std::size_t s = 1; s <= max_species; ++s) {
       if (counts[s] > max_count_[s]) {
