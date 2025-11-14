@@ -1,13 +1,17 @@
 // simulation.cpp - C++23
 #include "simulation.hpp"
 
+#include "debug_printer.hpp"
+
 #include <print> // changed from <iostream>
 
 Simulation::Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed)
     : generations_(number_of_generations), grid_dimension_(grid_dimension), density_(initial_density),
       seed_(random_seed), grid_(static_cast<std::size_t>(grid_dimension) * static_cast<std::size_t>(grid_dimension) *
                                     static_cast<std::size_t>(grid_dimension),
-                                0) {
+                                0),
+      debug_printer_{false} // <--- NEW
+{
   // Init maxima arrays
   for (std::size_t s = 1; s <= static_cast<std::size_t>(generator::N_SPECIES); ++s) {
     max_count_[s] = 0;
@@ -94,6 +98,9 @@ void Simulation::run() {
   std::vector<unsigned char> next(grid_.size());
 
   for (int gen = 0; gen < generations_; ++gen) {
+    // Print current state before evolving to next generation
+    debug_printer_.print_generation(gen, grid_, grid_dimension_);
+
     // Per-generation counts for maxima tracking
     std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
     counts.fill(0);

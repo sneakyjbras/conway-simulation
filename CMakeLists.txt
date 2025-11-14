@@ -17,6 +17,7 @@ add_executable(life3d
   src/parser.cpp
   src/simulation.cpp
   src/generator.cpp
+  src/debug_printer.cpp
 )
 target_include_directories(life3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(life3d PRIVATE OpenMP::OpenMP_CXX)

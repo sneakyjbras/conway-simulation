@@ -22,6 +22,7 @@ int main(int argc, char* argv[]) {
 
     Simulation simulation(static_cast<int>(cfg.number_of_generations), static_cast<int>(cfg.grid_dimension),
                           static_cast<float>(cfg.initial_density), static_cast<int>(cfg.random_seed));
+    simulation.set_debug(true);
 
     double wtime = -omp_get_wtime();
     simulation.run();
