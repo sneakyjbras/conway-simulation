@@ -22,7 +22,7 @@ public:
 
   // Inline wrapper for enabling/disabling debug prints.
   inline void set_debug_enabled(bool enabled) {
-    debug_printer_.set_enable(enabled);
+    debug_printer_.enable(enabled);
   }
 
 private:
