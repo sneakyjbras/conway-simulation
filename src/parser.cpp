@@ -3,49 +3,58 @@
 #include <charconv>
 #include <cmath> // std::isfinite
 #include <string>
+#include <type_traits>
 
 namespace {
 
+// Generic helper that parses either integers or floats using std::from_chars.
 template <class T>
 [[nodiscard]] auto parse_float_or_int(std::string_view text_to_parse, int base_if_int)
     -> std::expected<T, std::string> {
   T value{};
-  const char* const first = text_to_parse.begin();
-  const char* const last  = text_to_parse.end();
+  const char* const first = text_to_parse.data();
+  const char* const last  = first + text_to_parse.size();
 
   if constexpr (std::is_floating_point_v<T>) {
-    auto [ptr, ec] = std::from_chars(first, last, value, std::chars_format::general);
-    if (ec != std::errc() || ptr != last) {
-      return std::unexpected("not a valid floating-point number");
+    auto [ptr, ec] = std::from_chars(first, last, value);
+    if (ec != std::errc{} || ptr != last) {
+      return std::unexpected(std::string{"could not parse floating-point value '"} + std::string{text_to_parse} + "'");
     }
   } else {
+    static_assert(std::is_integral_v<T>, "parse_float_or_int only supports integral or floating-point types");
+
     auto [ptr, ec] = std::from_chars(first, last, value, base_if_int);
-    if (ec != std::errc() || ptr != last) {
-      return std::unexpected("not a valid integer");
+    if (ec != std::errc{} || ptr != last) {
+      return std::unexpected(std::string{"could not parse integer value '"} + std::string{text_to_parse} + "'");
     }
   }
+
   return value;
 }
 
 } // namespace
 
 template <class NumericType>
-auto CommandLineParser::parse_scalar(std::string_view text_to_parse, int integer_base)
+auto CommandLineParser::parse_scalar(std::string_view text_to_parse, std::int32_t integer_base)
     -> std::expected<NumericType, std::string> {
-  return parse_float_or_int<NumericType>(text_to_parse, integer_base);
+  // std::from_chars expects an int for the base; cast explicitly.
+  return parse_float_or_int<NumericType>(text_to_parse, static_cast<int>(integer_base));
 }
 
-// Explicit instantiations for the types we use.
-template auto CommandLineParser::parse_scalar<std::uint32_t>(std::string_view, int)
-    -> std::expected<std::uint32_t, std::string>;
-template auto CommandLineParser::parse_scalar<double>(std::string_view, int) -> std::expected<double, std::string>;
+// Explicit instantiations (optional but keeps compile times sane).
+template auto CommandLineParser::parse_scalar<std::uint64_t>(std::string_view, std::int32_t)
+    -> std::expected<std::uint64_t, std::string>;
+template auto CommandLineParser::parse_scalar<float>(std::string_view, std::int32_t)
+    -> std::expected<float, std::string>;
+template auto CommandLineParser::parse_scalar<std::int32_t>(std::string_view, std::int32_t)
+    -> std::expected<std::int32_t, std::string>;
 
 auto CommandLineParser::usage_message() -> std::string_view {
   return "Usage: <program> <generations> <grid_dimension> <density> <seed>";
 }
 
 auto CommandLineParser::parse(std::span<char* const> raw_arguments) -> std::expected<SimulationConfig, std::string> {
-  if (static_cast<int>(raw_arguments.size()) != kExpectedArgumentCount) {
+  if (raw_arguments.size() != static_cast<std::size_t>(kExpectedArgumentCount)) {
     return std::unexpected(std::string{usage_message()});
   }
 
@@ -54,8 +63,8 @@ auto CommandLineParser::parse(std::span<char* const> raw_arguments) -> std::expe
   const auto density_arg     = std::string_view{raw_arguments[static_cast<std::size_t>(ArgumentIndex::Density)]};
   const auto seed_arg        = std::string_view{raw_arguments[static_cast<std::size_t>(ArgumentIndex::Seed)]};
 
-  auto parsed_generations    = parse_scalar<std::uint32_t>(generations_arg);
-  auto parsed_grid_dimension = parse_scalar<std::uint32_t>(grid_dim_arg);
+  auto parsed_generations    = parse_scalar<std::uint64_t>(generations_arg);
+  auto parsed_grid_dimension = parse_scalar<std::uint64_t>(grid_dim_arg);
   auto parsed_density        = parse_scalar<float>(density_arg);
   auto parsed_seed           = parse_scalar<std::int32_t>(seed_arg);
 
