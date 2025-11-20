@@ -5,29 +5,6 @@
 
 #include <print> // instead of <iostream>
 
-namespace {
-
-// Pick the species with the highest count in the neighborhood.
-// Tie-breaker: smallest species id wins. 0 means "no birth".
-int pick_majority_species(const std::array<std::uint64_t, generator::N_SPECIES + 1>& species_counts) {
-  int best_species         = 0;
-  std::uint64_t best_count = 0;
-  const int max_s          = static_cast<int>(generator::N_SPECIES);
-
-  for (int s = 1; s <= max_s; ++s) {
-    const std::uint64_t c = species_counts[static_cast<std::size_t>(s)];
-    if (c > best_count || (c == best_count && c > 0 && s < best_species)) {
-      best_count   = c;
-      best_species = s;
-    }
-  }
-
-  // If all counts are zero, this returns 0 (no birth).
-  return best_species;
-}
-
-} // namespace
-
 Simulation::Simulation(std::uint64_t number_of_generations, std::uint64_t grid_dimension, float initial_density,
                        std::int32_t random_seed)
     : generations_(number_of_generations), grid_dimension_(grid_dimension), density_(initial_density),
@@ -60,18 +37,18 @@ std::size_t Simulation::index_3d(std::uint64_t x, std::uint64_t y, std::uint64_t
 
 void Simulation::initialize_from_generator() {
   // Get a temporary grid from the generator, copy it into our flat vector, then free it.
-  const int dim = static_cast<int>(grid_dimension_);
-  char*** g     = generator::gen_initial_grid(dim, density_, seed_);
+  char*** g = generator::gen_initial_grid(grid_dimension_, density_, seed_);
 
   for (std::uint64_t z = 0; z < grid_dimension_; ++z) {
     for (std::uint64_t y = 0; y < grid_dimension_; ++y) {
       for (std::uint64_t x = 0; x < grid_dimension_; ++x) {
-        grid_[index_3d(x, y, z)] = static_cast<unsigned char>(g[x][y][z]);
+        grid_[index_3d(x, y, z)] =
+            g[static_cast<std::size_t>(x)][static_cast<std::size_t>(y)][static_cast<std::size_t>(z)];
       }
     }
   }
 
-  generator::free_grid(g, dim);
+  generator::free_grid(g, grid_dimension_);
 }
 
 // Wrapper that preserves the old API shape (now using 64-bit quantities).
@@ -95,7 +72,7 @@ void Simulation::run() {
   for (std::uint64_t gen = 0; gen <= generations_; ++gen) {
     // 1. Print current state before evolving to next generation.
     // DebugPrinter still uses int-based API, so cast.
-    debug_printer_.print_generation(static_cast<int>(gen), grid_, static_cast<int>(grid_dimension_));
+    debug_printer_.print_generation(static_cast<std::uint64_t>(gen), grid_, grid_dimension_);
 
     // 2. Per-generation counts for maxima tracking (of the *current* generation).
     std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
@@ -110,6 +87,23 @@ void Simulation::run() {
     // 5. Make the newly computed generation the current one.
     grid_.swap(next);
   }
+}
+
+int Simulation::pick_majority_species(const std::array<std::uint64_t, generator::N_SPECIES + 1>& species_counts) {
+  int best_species         = 0;
+  std::uint64_t best_count = 0;
+  const int max_s          = static_cast<int>(generator::N_SPECIES);
+
+  for (int s = 1; s <= max_s; ++s) {
+    const std::uint64_t c = species_counts[static_cast<std::size_t>(s)];
+    if (c > best_count || (c == best_count && c > 0 && s < best_species)) {
+      best_count   = c;
+      best_species = s;
+    }
+  }
+
+  // If all counts are zero, this returns 0 (no birth).
+  return best_species;
 }
 
 void Simulation::step_generation(std::vector<unsigned char>& next,

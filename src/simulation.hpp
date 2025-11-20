@@ -34,6 +34,7 @@ private:
   std::uint64_t alive_neighbors_total(std::uint64_t x, std::uint64_t y, std::uint64_t z) const;
   std::uint64_t alive_neighbors_with_species(std::uint64_t x, std::uint64_t y, std::uint64_t z,
                                              std::array<std::uint64_t, generator::N_SPECIES + 1>& species_counts) const;
+  static int pick_majority_species(const std::array<std::uint64_t, generator::N_SPECIES + 1>& species_counts);
 
   // Wrapper that preserves the old API shape, but now with 64-bit quantities.
   std::uint64_t total_alive_neighbors(std::uint64_t x, std::uint64_t y, std::uint64_t z,
