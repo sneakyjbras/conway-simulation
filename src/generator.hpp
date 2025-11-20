@@ -14,15 +14,15 @@ inline constexpr std::uint32_t N_SPECIES = 9;
 void init_r4uni(std::int32_t input_seed);
 
 // Return a uniform float in [0,1).
-// (Same algorithm as the original r4_uni; kept for reproducibility.)
+// (Simple, deterministic RNG; good enough for initial conditions.)
 float r4_uni();
 
 // Allocate and fill a 3D grid with dimensions N x N x N.
 // Each cell is 0 (empty) or a species label in [1, N_SPECIES].
 // Caller owns the returned memory and must free it with free_grid().
-char*** gen_initial_grid(std::uint64_t N, float density, std::int32_t input_seed);
+unsigned char*** gen_initial_grid(std::uint64_t N, float density, std::int32_t input_seed);
 
 // Free a grid allocated by gen_initial_grid().
-void free_grid(char*** grid, std::uint64_t N);
+void free_grid(unsigned char*** grid, std::uint64_t N);
 
 } // namespace generator

@@ -59,19 +59,19 @@ std::size_t Simulation::index_3d(std::uint64_t x, std::uint64_t y, std::uint64_t
 }
 
 void Simulation::initialize_from_generator() {
-  // Get a temporary grid from the generator, copy it into our flat vector, then free it.
-  const int dim = static_cast<int>(grid_dimension_);
-  char*** g     = generator::gen_initial_grid(dim, density_, seed_);
+  // No need for casts; everything is already unsigned char.
+  unsigned char*** g = generator::gen_initial_grid(grid_dimension_, density_, seed_);
 
   for (std::uint64_t z = 0; z < grid_dimension_; ++z) {
     for (std::uint64_t y = 0; y < grid_dimension_; ++y) {
       for (std::uint64_t x = 0; x < grid_dimension_; ++x) {
-        grid_[index_3d(x, y, z)] = static_cast<unsigned char>(g[x][y][z]);
+        grid_[index_3d(x, y, z)] =
+            g[static_cast<std::size_t>(x)][static_cast<std::size_t>(y)][static_cast<std::size_t>(z)];
       }
     }
   }
 
-  generator::free_grid(g, dim);
+  generator::free_grid(g, grid_dimension_);
 }
 
 // Wrapper that preserves the old API shape (now using 64-bit quantities).
