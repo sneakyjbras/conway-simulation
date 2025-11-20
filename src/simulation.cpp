@@ -7,6 +7,8 @@
 
 namespace {
 
+// Pick the species with the highest count in the neighborhood.
+// Tie-breaker: smallest species id wins. 0 means "no birth".
 int pick_majority_species(const std::array<int, generator::N_SPECIES + 1>& species_counts) {
   int best_species = 0;
   int best_count   = 0;
@@ -60,8 +62,6 @@ void Simulation::initialize_from_generator() {
   // Get a temporary grid from the generator, copy it into our flat vector, then free it.
   char*** g = generator::gen_initial_grid(grid_dimension_, density_, seed_);
 
-  // Semantics: loops always use (z, y, x) nesting with x as the innermost,
-  // and pass (x, y, z) to index_3d to keep the mapping consistent.
   for (int z = 0; z < grid_dimension_; ++z) {
     for (int y = 0; y < grid_dimension_; ++y) {
       for (int x = 0; x < grid_dimension_; ++x) {
@@ -90,81 +90,94 @@ void Simulation::run() {
   // Allocate once; we just overwrite contents every generation.
   std::vector<unsigned char> next(grid_.size());
 
+  for (int gen = 0; gen <= generations_; ++gen) {
+    // 1. Print current state before evolving to next generation.
+    debug_printer_.print_generation(gen, grid_, grid_dimension_);
+
+    // 2. Per-generation counts for maxima tracking (of the *current* generation).
+    std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
+    counts.fill(0);
+
+    // 3. Compute the next generation and fill 'counts' from the current grid.
+    step_generation(next, counts);
+
+    // 4. Update per-species maxima using this generation's counts.
+    update_maxima_for_generation(counts, static_cast<std::uint64_t>(gen));
+
+    // 5. Make the newly computed generation the current one.
+    grid_.swap(next);
+  }
+}
+
+void Simulation::step_generation(std::vector<unsigned char>& next,
+                                 std::array<std::uint64_t, generator::N_SPECIES + 1>& counts) {
   // Precompute constants used in the tight loops.
-  const std::size_t n           = static_cast<std::size_t>(grid_dimension_);
-  const std::size_t n2          = n * n;
-  const std::size_t max_species = static_cast<std::size_t>(generator::N_SPECIES);
+  const std::size_t n  = static_cast<std::size_t>(grid_dimension_);
+  const std::size_t n2 = n * n;
 
   // Reuse a single histogram for dead cells; we’ll clear it per-use.
   std::array<int, generator::N_SPECIES + 1> species_counts{};
 
-  for (int gen = 0; gen <= generations_; ++gen) {
-    // Print current state before evolving to next generation
-    debug_printer_.print_generation(gen, grid_, grid_dimension_);
+  // NOTE: The inner triple loop over (z, y, x) for a fixed generation is embarrassingly parallel:
+  // - 'grid_' is read-only within this loop
+  // - 'next' is write-only at distinct indices
+  // To parallelize (e.g. with OpenMP), make 'species_counts' thread-local and
+  // reduce 'counts' across threads after the z/y/x loops.
+  for (int z = 0; z < grid_dimension_; ++z) {
+    const std::size_t z_base = static_cast<std::size_t>(z) * n2;
 
-    // Per-generation counts for maxima tracking (of the *current* generation)
-    std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
-    counts.fill(0);
+    for (int y = 0; y < grid_dimension_; ++y) {
+      const std::size_t row = z_base + static_cast<std::size_t>(y) * n;
 
-    // NOTE: The inner triple loop over (z, y, x) for a fixed generation is embarrassingly parallel:
-    // - 'grid_' is read-only within this loop
-    // - 'next' is write-only at distinct indices
-    // To parallelize (e.g. with OpenMP), make 'species_counts' thread-local and
-    // reduce 'counts' across threads after the z/y/x loops.
-    for (int z = 0; z < grid_dimension_; ++z) {
-      const std::size_t z_base = static_cast<std::size_t>(z) * n2;
+      for (int x = 0; x < grid_dimension_; ++x) {
+        const std::size_t idx = row + static_cast<std::size_t>(x);
+        const auto current    = grid_[idx];
 
-      for (int y = 0; y < grid_dimension_; ++y) {
-        const std::size_t row = z_base + static_cast<std::size_t>(y) * n;
-
-        for (int x = 0; x < grid_dimension_; ++x) {
-          const std::size_t idx = row + static_cast<std::size_t>(x);
-          const auto current    = grid_[idx];
-
-          // Count the current generation’s species BEFORE computing the next one.
-          if (current != sim_detail::DEAD_CELL) {
-            counts[static_cast<std::size_t>(current)]++;
-          }
-
-          unsigned char new_value = sim_detail::DEAD_CELL;
-
-          if (current != sim_detail::DEAD_CELL) {
-            // ALIVE cell: use simple total count (with early exit inside).
-            const int total_neighbors = alive_neighbors_total(x, y, z);
-
-            // Survival rule: stays alive if 5–13 neighbors.
-            if (total_neighbors >= 5 && total_neighbors <= 13) {
-              new_value = current;
-            }
-          } else {
-            // DEAD cell: reuse the same species_counts buffer, but reset it.
-            species_counts.fill(0);
-
-            const int total_neighbors = alive_neighbors_with_species(x, y, z, species_counts);
-
-            // Birth rule: 7–10 neighbors -> cell becomes alive.
-            if (total_neighbors >= 7 && total_neighbors <= 10) {
-              const int best_species = pick_majority_species(species_counts);
-              if (best_species != 0) {
-                new_value = static_cast<unsigned char>(best_species);
-              }
-            }
-          }
-
-          next[idx] = new_value;
+        // Count the current generation’s species BEFORE computing the next one.
+        if (current != sim_detail::DEAD_CELL) {
+          counts[static_cast<std::size_t>(current)]++;
         }
+
+        unsigned char new_value = sim_detail::DEAD_CELL;
+
+        if (current != sim_detail::DEAD_CELL) {
+          // ALIVE cell: use simple total count (with early exit inside).
+          const int total_neighbors = alive_neighbors_total(x, y, z);
+
+          // Survival rule: stays alive if 5–13 neighbors.
+          if (total_neighbors >= 5 && total_neighbors <= 13) {
+            new_value = current;
+          }
+        } else {
+          // DEAD cell: reuse the same species_counts buffer, but reset it.
+          species_counts.fill(0);
+
+          const int total_neighbors = alive_neighbors_with_species(x, y, z, species_counts);
+
+          // Birth rule: 7–10 neighbors -> cell becomes alive.
+          if (total_neighbors >= 7 && total_neighbors <= 10) {
+            const int best_species = pick_majority_species(species_counts);
+            if (best_species != 0) {
+              new_value = static_cast<unsigned char>(best_species);
+            }
+          }
+        }
+
+        next[idx] = new_value;
       }
     }
+  }
+}
 
-    // Update maxima per species based on the *current* generation (pre-evolution)
-    for (std::size_t s = 1; s <= max_species; ++s) {
-      if (counts[s] > max_count_[s]) {
-        max_count_[s] = counts[s];
-        max_gen_[s]   = static_cast<std::uint64_t>(gen);
-      }
+void Simulation::update_maxima_for_generation(const std::array<std::uint64_t, generator::N_SPECIES + 1>& counts,
+                                              std::uint64_t gen) {
+  const std::size_t max_species = static_cast<std::size_t>(generator::N_SPECIES);
+
+  for (std::size_t s = 1; s <= max_species; ++s) {
+    if (counts[s] > max_count_[s]) {
+      max_count_[s] = counts[s];
+      max_gen_[s]   = gen;
     }
-
-    grid_.swap(next);
   }
 }
 

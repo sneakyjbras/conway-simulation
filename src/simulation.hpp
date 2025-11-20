@@ -9,7 +9,7 @@
 
 namespace sim_detail {
 inline constexpr unsigned char DEAD_CELL = 0;
-}
+} // namespace sim_detail
 
 class Simulation {
 public:
@@ -29,12 +29,22 @@ private:
 
   void initialize_from_generator();
 
+  // Internal helpers for neighbor counting.
   int alive_neighbors_total(int x, int y, int z) const;
   int alive_neighbors_with_species(int x, int y, int z,
                                    std::array<int, generator::N_SPECIES + 1>& species_counts) const;
 
+  // Wrapper that preserves the old API.
   int total_alive_neighbors(int x, int y, int z, std::array<int, generator::N_SPECIES + 1>* per_species) const;
   int total_alive_neighbors(int x, int y, int z) const;
+
+  // Perform one generation step: read from grid_, write into 'next', and fill 'counts'
+  // with per-species populations for the current generation.
+  void step_generation(std::vector<unsigned char>& next, std::array<std::uint64_t, generator::N_SPECIES + 1>& counts);
+
+  // Update maxima arrays using the counts for a given generation index.
+  void update_maxima_for_generation(const std::array<std::uint64_t, generator::N_SPECIES + 1>& counts,
+                                    std::uint64_t gen);
 
   int generations_;
   int grid_dimension_;
@@ -46,6 +56,7 @@ private:
   bool use_bitmask_wrap_{false};
   int wrap_mask_{0};
 
+  // index 0 is unused; 1..N_SPECIES are valid
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_count_{};
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_gen_{};
 
