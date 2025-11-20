@@ -5,11 +5,127 @@
 
 #include <print> // instead of <iostream>
 
+namespace {
+
+// Unified neighbor-counting helper.
+//
+// CountSpecies = false  -> only total neighbors (alive-cell path, early-exit > 13)
+// CountSpecies = true   -> total + per-species histogram (dead-cell path, early-exit > 10)
+template <bool CountSpecies>
+int alive_neighbors_common(int x, int y, int z, int grid_dimension, bool use_bitmask_wrap, int wrap_mask,
+                           const std::vector<unsigned char>& grid,
+                           std::array<int, generator::N_SPECIES + 1>* species_counts) {
+  int total                 = 0;
+  const int n               = grid_dimension;
+  constexpr int max_survive = 13;
+  constexpr int max_birth   = 10;
+  const int max_neighbors   = CountSpecies ? max_birth : max_survive;
+
+  if (n <= 0) {
+    return 0;
+  }
+
+  if (use_bitmask_wrap) {
+    const int mask         = wrap_mask;
+    const std::size_t n_sz = static_cast<std::size_t>(n);
+
+    for (int dz = -1; dz <= 1; ++dz) {
+      const int z2 = (z + dz) & mask;
+
+      for (int dy = -1; dy <= 1; ++dy) {
+        const int y2 = (y + dy) & mask;
+
+        for (int dx = -1; dx <= 1; ++dx) {
+          if (dx == 0 && dy == 0 && dz == 0) {
+            continue; // skip the cell itself
+          }
+
+          const int x2 = (x + dx) & mask;
+
+          const std::size_t idx = (static_cast<std::size_t>(z2) * n_sz + static_cast<std::size_t>(y2)) * n_sz +
+                                  static_cast<std::size_t>(x2);
+
+          const auto value = grid[idx];
+
+          if (value != static_cast<unsigned char>(0)) {
+            ++total;
+
+            if constexpr (CountSpecies) {
+              // species_counts must be non-null when CountSpecies == true
+              (*species_counts)[static_cast<std::size_t>(value)]++;
+            }
+
+            if (total > max_neighbors) {
+              return total; // early exit
+            }
+          }
+        }
+      }
+    }
+  } else {
+    const int n_minus_1    = n - 1;
+    const std::size_t n_sz = static_cast<std::size_t>(n);
+
+    for (int dz = -1; dz <= 1; ++dz) {
+      int z2 = z + dz;
+      if (z2 < 0) {
+        z2 = n_minus_1;
+      } else if (z2 >= n) {
+        z2 = 0;
+      }
+
+      for (int dy = -1; dy <= 1; ++dy) {
+        int y2 = y + dy;
+        if (y2 < 0) {
+          y2 = n_minus_1;
+        } else if (y2 >= n) {
+          y2 = 0;
+        }
+
+        for (int dx = -1; dx <= 1; ++dx) {
+          if (dx == 0 && dy == 0 && dz == 0) {
+            continue; // skip the cell itself
+          }
+
+          int x2 = x + dx;
+          if (x2 < 0) {
+            x2 = n_minus_1;
+          } else if (x2 >= n) {
+            x2 = 0;
+          }
+
+          const std::size_t idx = (static_cast<std::size_t>(z2) * n_sz + static_cast<std::size_t>(y2)) * n_sz +
+                                  static_cast<std::size_t>(x2);
+
+          const auto value = grid[idx];
+
+          if (value != static_cast<unsigned char>(0)) {
+            ++total;
+
+            if constexpr (CountSpecies) {
+              (*species_counts)[static_cast<std::size_t>(value)]++;
+            }
+
+            if (total > max_neighbors) {
+              return total;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return total;
+}
+
+} // namespace
+
 Simulation::Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed)
     : generations_(number_of_generations), grid_dimension_(grid_dimension), density_(initial_density),
-      seed_(random_seed), grid_(static_cast<std::size_t>(grid_dimension) * static_cast<std::size_t>(grid_dimension) *
-                                    static_cast<std::size_t>(grid_dimension),
-                                0),
+      seed_(static_cast<std::int32_t>(random_seed)),
+      grid_(static_cast<std::size_t>(grid_dimension) * static_cast<std::size_t>(grid_dimension) *
+                static_cast<std::size_t>(grid_dimension),
+            0),
       use_bitmask_wrap_{false}, wrap_mask_{0}, debug_printer_{false} {
 
   // Configure fast toroidal wrap-around if the dimension is a power of two.
@@ -18,7 +134,7 @@ Simulation::Simulation(int number_of_generations, int grid_dimension, float init
     wrap_mask_        = grid_dimension_ - 1;
   }
 
-  // Init maxima arrays (index 0 is unused, but keep everything clean).
+  // Init maxima arrays (index 0 is unused, but keeps everything clean).
   for (std::size_t s = 1; s <= static_cast<std::size_t>(generator::N_SPECIES); ++s) {
     max_count_[s] = 0;
     max_gen_[s]   = 0;
@@ -37,6 +153,9 @@ std::size_t Simulation::index_3d(int x, int y, int z) const {
 void Simulation::initialize_from_generator() {
   // Get a temporary grid from the generator, copy it into our flat vector, then free it.
   char*** g = generator::gen_initial_grid(grid_dimension_, density_, seed_);
+
+  // Semantics: loops always use (z, y, x) nesting with x as the innermost,
+  // and pass (x, y, z) to index_3d to keep the mapping consistent.
   for (int z = 0; z < grid_dimension_; ++z) {
     for (int y = 0; y < grid_dimension_; ++y) {
       for (int x = 0; x < grid_dimension_; ++x) {
@@ -44,6 +163,7 @@ void Simulation::initialize_from_generator() {
       }
     }
   }
+
   generator::free_grid(g, grid_dimension_);
 }
 
@@ -62,155 +182,13 @@ int Simulation::total_alive_neighbors(int x, int y, int z) const {
 
 // Alive-cell path: only total, early-exit at >13 neighbors.
 int Simulation::alive_neighbors_total(int x, int y, int z) const {
-  int total                 = 0;
-  const int n               = grid_dimension_;
-  constexpr int max_survive = 13;
-
-  if (use_bitmask_wrap_) {
-    const int mask = wrap_mask_;
-    for (int dz = -1; dz <= 1; ++dz) {
-      const int nz = (z + dz) & mask;
-      for (int dy = -1; dy <= 1; ++dy) {
-        const int ny = (y + dy) & mask;
-        for (int dx = -1; dx <= 1; ++dx) {
-          if (dx == 0 && dy == 0 && dz == 0) {
-            continue; // skip the cell itself
-          }
-
-          const int nx        = (x + dx) & mask;
-          const auto idx      = index_3d(nx, ny, nz);
-          const auto neighbor = grid_[idx];
-
-          if (neighbor != static_cast<unsigned char>(0)) {
-            ++total;
-            if (total > max_survive) {
-              // Early exit: an alive cell with >13 neighbors will die.
-              return total;
-            }
-          }
-        }
-      }
-    }
-  } else {
-    for (int dz = -1; dz <= 1; ++dz) {
-      int nz = z + dz;
-      if (nz < 0)
-        nz += n;
-      else if (nz >= n)
-        nz -= n;
-
-      for (int dy = -1; dy <= 1; ++dy) {
-        int ny = y + dy;
-        if (ny < 0)
-          ny += n;
-        else if (ny >= n)
-          ny -= n;
-
-        for (int dx = -1; dx <= 1; ++dx) {
-          if (dx == 0 && dy == 0 && dz == 0) {
-            continue; // skip the cell itself
-          }
-
-          int nx = x + dx;
-          if (nx < 0)
-            nx += n;
-          else if (nx >= n)
-            nx -= n;
-
-          const auto idx      = index_3d(nx, ny, nz);
-          const auto neighbor = grid_[idx];
-
-          if (neighbor != static_cast<unsigned char>(0)) {
-            ++total;
-            if (total > max_survive) {
-              return total;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return total;
+  return alive_neighbors_common<false>(x, y, z, grid_dimension_, use_bitmask_wrap_, wrap_mask_, grid_, nullptr);
 }
 
 // Dead-cell path: total + per-species counts, early-exit at >10 neighbors.
 int Simulation::alive_neighbors_with_species(int x, int y, int z,
                                              std::array<int, generator::N_SPECIES + 1>& species_counts) const {
-  int total               = 0;
-  const int n             = grid_dimension_;
-  constexpr int max_birth = 10;
-
-  if (use_bitmask_wrap_) {
-    const int mask = wrap_mask_;
-    for (int dz = -1; dz <= 1; ++dz) {
-      const int nz = (z + dz) & mask;
-      for (int dy = -1; dy <= 1; ++dy) {
-        const int ny = (y + dy) & mask;
-        for (int dx = -1; dx <= 1; ++dx) {
-          if (dx == 0 && dy == 0 && dz == 0) {
-            continue; // skip the cell itself
-          }
-
-          const int nx        = (x + dx) & mask;
-          const auto idx      = index_3d(nx, ny, nz);
-          const auto neighbor = grid_[idx];
-
-          if (neighbor != static_cast<unsigned char>(0)) {
-            ++total;
-            species_counts[static_cast<std::size_t>(neighbor)]++;
-
-            if (total > max_birth) {
-              // Early exit: a dead cell with >10 neighbors will stay dead.
-              return total;
-            }
-          }
-        }
-      }
-    }
-  } else {
-    for (int dz = -1; dz <= 1; ++dz) {
-      int nz = z + dz;
-      if (nz < 0)
-        nz += n;
-      else if (nz >= n)
-        nz -= n;
-
-      for (int dy = -1; dy <= 1; ++dy) {
-        int ny = y + dy;
-        if (ny < 0)
-          ny += n;
-        else if (ny >= n)
-          ny -= n;
-
-        for (int dx = -1; dx <= 1; ++dx) {
-          if (dx == 0 && dy == 0 && dz == 0) {
-            continue; // skip the cell itself
-          }
-
-          int nx = x + dx;
-          if (nx < 0)
-            nx += n;
-          else if (nx >= n)
-            nx -= n;
-
-          const auto idx      = index_3d(nx, ny, nz);
-          const auto neighbor = grid_[idx];
-
-          if (neighbor != static_cast<unsigned char>(0)) {
-            ++total;
-            species_counts[static_cast<std::size_t>(neighbor)]++;
-
-            if (total > max_birth) {
-              return total;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return total;
+  return alive_neighbors_common<true>(x, y, z, grid_dimension_, use_bitmask_wrap_, wrap_mask_, grid_, &species_counts);
 }
 
 void Simulation::run() {
