@@ -1,13 +1,37 @@
 // simulation.cpp - C++23
 #include "simulation.hpp"
 
+#include "debug_printer.hpp"
+
 #include <print> // instead of <iostream>
+
+namespace {
+
+int pick_majority_species(const std::array<int, generator::N_SPECIES + 1>& species_counts) {
+  int best_species = 0;
+  int best_count   = 0;
+  const int max_s  = static_cast<int>(generator::N_SPECIES);
+
+  for (int s = 1; s <= max_s; ++s) {
+    const int c = species_counts[static_cast<std::size_t>(s)];
+    if (c > best_count || (c == best_count && c > 0 && s < best_species)) {
+      best_count   = c;
+      best_species = s;
+    }
+  }
+
+  // If all counts are zero, this returns 0 (no birth).
+  return best_species;
+}
+
+} // namespace
 
 Simulation::Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed)
     : generations_(number_of_generations), grid_dimension_(grid_dimension), density_(initial_density),
-      seed_(random_seed), grid_(static_cast<std::size_t>(grid_dimension) * static_cast<std::size_t>(grid_dimension) *
-                                    static_cast<std::size_t>(grid_dimension),
-                                0),
+      seed_(static_cast<std::int32_t>(random_seed)),
+      grid_(static_cast<std::size_t>(grid_dimension) * static_cast<std::size_t>(grid_dimension) *
+                static_cast<std::size_t>(grid_dimension),
+            0),
       use_bitmask_wrap_{false}, wrap_mask_{0}, debug_printer_{false} {
 
   // Configure fast toroidal wrap-around if the dimension is a power of two.
@@ -27,7 +51,7 @@ Simulation::Simulation(int number_of_generations, int grid_dimension, float init
 
 Simulation::~Simulation() = default;
 
-std::size_t Simulation::index_3d(int x, int y, int z) const {
+std::size_t Simulation::index_3d(int x, int y, int z) const noexcept {
   const std::size_t n = static_cast<std::size_t>(grid_dimension_);
   return (static_cast<std::size_t>(z) * n + static_cast<std::size_t>(y)) * n + static_cast<std::size_t>(x);
 }
@@ -82,24 +106,29 @@ void Simulation::run() {
     std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
     counts.fill(0);
 
+    // NOTE: The inner triple loop over (z, y, x) for a fixed generation is embarrassingly parallel:
+    // - 'grid_' is read-only within this loop
+    // - 'next' is write-only at distinct indices
+    // To parallelize (e.g. with OpenMP), make 'species_counts' thread-local and
+    // reduce 'counts' across threads after the z/y/x loops.
     for (int z = 0; z < grid_dimension_; ++z) {
       const std::size_t z_base = static_cast<std::size_t>(z) * n2;
 
       for (int y = 0; y < grid_dimension_; ++y) {
-        const std::size_t base = z_base + static_cast<std::size_t>(y) * n;
+        const std::size_t row = z_base + static_cast<std::size_t>(y) * n;
 
         for (int x = 0; x < grid_dimension_; ++x) {
-          const std::size_t idx = base + static_cast<std::size_t>(x);
+          const std::size_t idx = row + static_cast<std::size_t>(x);
           const auto current    = grid_[idx];
 
           // Count the current generation’s species BEFORE computing the next one.
-          if (current != static_cast<unsigned char>(0)) {
+          if (current != sim_detail::DEAD_CELL) {
             counts[static_cast<std::size_t>(current)]++;
           }
 
-          unsigned char new_value = 0;
+          unsigned char new_value = sim_detail::DEAD_CELL;
 
-          if (current != static_cast<unsigned char>(0)) {
+          if (current != sim_detail::DEAD_CELL) {
             // ALIVE cell: use simple total count (with early exit inside).
             const int total_neighbors = alive_neighbors_total(x, y, z);
 
@@ -115,24 +144,8 @@ void Simulation::run() {
 
             // Birth rule: 7–10 neighbors -> cell becomes alive.
             if (total_neighbors >= 7 && total_neighbors <= 10) {
-              int best_species = 0;
-              int best_count   = 0;
-              const int max_s  = static_cast<int>(generator::N_SPECIES);
-
-              // Pick species with highest count.
-              // Tie-breaker: lowest species id wins.
-              for (int s = 1; s <= max_s; ++s) {
-                const int c = species_counts[static_cast<std::size_t>(s)];
-
-                if (c > best_count) {
-                  best_count   = c;
-                  best_species = s;
-                } else if (c == best_count && c > 0 && s < best_species) {
-                  best_species = s;
-                }
-              }
-
-              if (best_count > 0) {
+              const int best_species = pick_majority_species(species_counts);
+              if (best_species != 0) {
                 new_value = static_cast<unsigned char>(best_species);
               }
             }

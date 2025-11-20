@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace sim_detail {
+inline constexpr unsigned char DEAD_CELL = 0;
+}
+
 class Simulation {
 public:
   Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed);
@@ -21,7 +25,7 @@ public:
   }
 
 private:
-  std::size_t index_3d(int x, int y, int z) const;
+  [[nodiscard]] std::size_t index_3d(int x, int y, int z) const noexcept;
 
   void initialize_from_generator();
 
@@ -35,14 +39,13 @@ private:
   int generations_;
   int grid_dimension_;
   float density_;
-  int seed_;
+  std::int32_t seed_;
 
   std::vector<unsigned char> grid_;
 
   bool use_bitmask_wrap_{false};
   int wrap_mask_{0};
 
-  // index 0 is unused; 1..N_SPECIES are valid
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_count_{};
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_gen_{};
 

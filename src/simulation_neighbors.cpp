@@ -42,7 +42,7 @@ int alive_neighbors_bitmask(int x, int y, int z, int grid_dimension, int wrap_ma
 
         const unsigned char value = grid[idx];
 
-        if (value != static_cast<unsigned char>(0)) {
+        if (value != sim_detail::DEAD_CELL) {
           ++total;
 
           if constexpr (CountSpecies) {
@@ -109,7 +109,7 @@ int alive_neighbors_modular(int x, int y, int z, int grid_dimension, const std::
 
         const unsigned char value = grid[idx];
 
-        if (value != static_cast<unsigned char>(0)) {
+        if (value != sim_detail::DEAD_CELL) {
           ++total;
 
           if constexpr (CountSpecies) {
