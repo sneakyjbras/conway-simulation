@@ -16,6 +16,7 @@ add_executable(life3d
   src/main.cpp
   src/parser.cpp
   src/simulation.cpp
+  src/simulation_neighbors.cpp
   src/generator.cpp
   src/debug_printer.cpp
 )
