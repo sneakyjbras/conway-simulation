@@ -1,36 +1,37 @@
 #!/usr/bin/env bash
-# run.sh — clean rebuild and run wrapper for life3d (CMake + OpenMP)
+# run.sh — rebuild and run life3d
+#
 # Usage:
-#   ./run.sh [--clean] [--type Debug|Release] [--threads N] [--] <generations> <N> <density> <seed>
+#   ./run.sh [--clean] [--type Debug|Release] [--threads N] [--debug] [--] <generations> <N> <density> <seed>
+#
 # Examples:
-#   ./run.sh --clean --type Release -- 4 64 .25 123
-#   ./run.sh --threads 8 -- 200 256 .18 42
+#   ./run.sh --clean -- 4 8 0.25 123
+#   ./run.sh --threads 8 -- 200 256 0.18 42
 
 set -euo pipefail
 
-# Defaults
 BUILD_TYPE="Release"
 THREADS=""
 CLEAN=0
+DEBUG_FLAG=""
 
-# Parse flags
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --clean) CLEAN=1; shift ;;
-    --type)  BUILD_TYPE="${2:-Release}"; shift 2 ;;
-    --threads) THREADS="${2:-}"; shift 2 ;;
-    --) shift; break ;;
-    *) break ;;
+    --clean)   CLEAN=1;                        shift   ;;
+    --type)    BUILD_TYPE="${2:-Release}";     shift 2 ;;
+    --threads) THREADS="${2:-}";               shift 2 ;;
+    --debug)   DEBUG_FLAG="--debug";           shift   ;;
+    --)        shift; break                            ;;
+    *)         break                                   ;;
   esac
 done
 
-# Remaining args are program args
 if [[ $# -lt 4 ]]; then
-  echo "Usage: $0 [--clean] [--type Debug|Release] [--threads N] -- <generations> <N> <density> <seed>" >&2
+  echo "Usage: $0 [--clean] [--type Debug|Release] [--threads N] [--debug] -- <generations> <N> <density> <seed>" >&2
   exit 1
 fi
 
-# Detect core count if --threads not provided
+# Auto-detect thread count.
 if [[ -z "${THREADS}" ]]; then
   if command -v nproc >/dev/null 2>&1; then
     THREADS="$(nproc)"
@@ -45,19 +46,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 
 if [[ "${CLEAN}" -eq 1 && -d "${BUILD_DIR}" ]]; then
-  echo "[run.sh] Cleaning build directory..."
+  echo "[run.sh] Cleaning ${BUILD_DIR}..."
   rm -rf "${BUILD_DIR}"
 fi
 
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-echo "[run.sh] Configuring (CMAKE_BUILD_TYPE=${BUILD_TYPE})..."
-cmake -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+echo "[run.sh] Configuring (type=${BUILD_TYPE})..."
+cmake -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 echo "[run.sh] Building with ${THREADS} threads..."
 cmake --build . -j "${THREADS}"
 
 echo "[run.sh] Running: ./life3d $*"
+export OMP_NUM_THREADS="${THREADS}"
 ./life3d "$@"
-

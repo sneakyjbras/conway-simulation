@@ -1,28 +1,21 @@
 #pragma once
-// generator.hpp - C++23
-// Simple 3D initial grid generator (ported from the original C code).
-// No frills; straightforward API.
+// generator.hpp – C++23
+//
+// Generates the initial 3-D grid as a flat std::vector<unsigned char>.
+// The old char*** triple-pointer API has been replaced: callers no longer
+// manage heap allocation, and the resulting buffer is cache-contiguous.
 
-#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace generator {
 
 inline constexpr std::uint32_t N_SPECIES = 9;
 
-// Initialize the RNG with an input seed (32-bit signed).
-void init_r4uni(std::int32_t input_seed);
-
-// Return a uniform float in [0,1).
-// (Same algorithm as the original r4_uni; kept for reproducibility.)
-float r4_uni();
-
-// Allocate and fill a 3D grid with dimensions N x N x N.
-// Each cell is 0 (empty) or a species label in [1, N_SPECIES].
-// Caller owns the returned memory and must free it with free_grid().
-char*** gen_initial_grid(std::uint64_t N, float density, std::int32_t input_seed);
-
-// Free a grid allocated by gen_initial_grid().
-void free_grid(char*** grid, std::uint64_t N);
+// Allocate and fill a flat N×N×N grid (z-major, then y, then x).
+// Cell encoding: 0 = dead, 1..N_SPECIES = species label.
+// The returned vector has exactly N*N*N elements.
+[[nodiscard]] std::vector<unsigned char>
+gen_initial_grid(std::uint64_t N, float density, std::int32_t input_seed);
 
 } // namespace generator

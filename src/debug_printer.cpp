@@ -1,46 +1,50 @@
-// debug_printer.cpp
+// debug_printer.cpp – C++23
+
 #include "debug_printer.hpp"
 
-#include <print>
+#include <cstdio>
 #include <string>
 
-void DebugPrinter::print_generation(std::uint64_t generation, const std::vector<unsigned char>& grid,
-                                    std::uint64_t grid_dimension) const {
+void DebugPrinter::print_generation(std::uint64_t                    generation,
+                                    const std::vector<unsigned char>& grid,
+                                    std::uint64_t                    grid_dimension,
+                                    std::uint64_t                    ghost_dim) const {
   if (!enabled_) {
     return;
   }
 
-  const std::size_t n  = static_cast<std::size_t>(grid_dimension);
-  const std::size_t n2 = n * n;
+  const std::size_t N   = static_cast<std::size_t>(grid_dimension);
+  const std::size_t Ng  = static_cast<std::size_t>(ghost_dim); // N+2
+  const std::size_t Ng2 = Ng * Ng;
 
-  std::println("Generation {}  ------------------------------", generation);
+  std::fprintf(stdout, "Generation %llu  ------------------------------\n",
+               static_cast<unsigned long long>(generation));
 
-  for (std::size_t z = 0; z < n; ++z) {
-    std::println("Layer z = {}", z);
+  for (std::size_t z = 0; z < N; ++z) {
+    std::fprintf(stdout, "Layer z = %zu\n", z);
 
-    for (std::size_t y = 0; y < n; ++y) {
+    for (std::size_t y = 0; y < N; ++y) {
       std::string line;
-      line.reserve(2 * n); // rough reserve: "v " per cell
+      line.reserve(2 * N);
 
-      for (std::size_t x = 0; x < n; ++x) {
-        const std::size_t idx = (z * n2) + (y * n) + x;
+      for (std::size_t x = 0; x < N; ++x) {
+        // Interior cell (x,y,z) lives at ghost position (x+1, y+1, z+1).
+        const std::size_t idx = (z + 1) * Ng2 + (y + 1) * Ng + (x + 1);
         const unsigned char v = grid[idx];
 
         if (v == 0) {
-          // Use '.' for dead cells.
           line += ". ";
         } else {
-          // Species are 1..9 so this matches your screenshot.
           line += static_cast<char>('0' + v);
           line += ' ';
         }
       }
 
-      std::println("{}", line);
+      std::fprintf(stdout, "%s\n", line.c_str());
     }
 
-    std::println(""); // blank line between layers
+    std::fputc('\n', stdout);
   }
 
-  std::println(""); // blank line between generations
+  std::fputc('\n', stdout);
 }
