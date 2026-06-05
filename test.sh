@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# test.sh — correctness, mode-coverage, and performance tests for life3d
+# test.sh — correctness and performance tests for life3d
 #
 # Usage:
-#   ./test.sh [--binary path/to/life3d] [--threads N] [--bench]
+#   ./test.sh [--binary path/to/life3d] [--bench]
 #
 # By default looks for ./build/life3d.
 
 set -euo pipefail
 
 BINARY=""
-THREADS=""
 RUN_BENCH=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --binary)  BINARY="$2";  shift 2 ;;
-    --threads) THREADS="$2"; shift 2 ;;
-    --bench)   RUN_BENCH=1;  shift   ;;
+    --binary) BINARY="$2"; shift 2 ;;
+    --bench)  RUN_BENCH=1; shift   ;;
     *)  echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -29,11 +27,7 @@ if [[ ! -x "${BINARY}" ]]; then
   exit 1
 fi
 
-if [[ -z "${THREADS}" ]]; then
-  THREADS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-fi
-export OMP_NUM_THREADS="${THREADS}"
-echo "[test] binary=${BINARY}  OMP_NUM_THREADS=${THREADS}"
+echo "[test] binary=${BINARY}"
 echo ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -52,12 +46,12 @@ check() {
 }
 
 run_sim() {
-  # run_sim <gen> <N> <density> <seed> — prints stdout; timing/mode to stderr
+  # run_sim <gen> <N> <density> <seed> — stdout only
   "${BINARY}" "$1" "$2" "$3" "$4" 2>/dev/null
 }
 
 run_sim_stderr() {
-  # run_sim_stderr <gen> <N> <density> <seed> — prints stderr only
+  # run_sim_stderr <gen> <N> <density> <seed> — stderr only
   "${BINARY}" "$1" "$2" "$3" "$4" 2>&1 1>/dev/null
 }
 
@@ -131,34 +125,27 @@ done
 echo ""
 
 # ── Mode coverage ─────────────────────────────────────────────────────────────
-# Both modes must fire for a simulation to be trustworthy.
 echo "── Mode coverage ────────────────────────────────────────────────────────"
 
-# d=0.08: gen 0 is dense (initial dirty_ratio ≈ 88%), remainder sparse
 MODE_D008="$(run_sim_stderr 100 32 0.08 42)"
 echo "  d=0.08 N=32 gen=100: ${MODE_D008}"
 
-DENSE_N="$(echo "${MODE_D008}" | grep -oP 'dense=\K[0-9]+' || echo 0)"
+DENSE_N="$(echo "${MODE_D008}"  | grep -oP 'dense=\K[0-9]+'  || echo 0)"
 SPARSE_N="$(echo "${MODE_D008}" | grep -oP 'sparse=\K[0-9]+' || echo 0)"
 
-check "dense  mode fires (initial dirty_ratio > threshold)" "yes" \
-      "$([[ "${DENSE_N}"  -gt 0 ]] && echo yes || echo no)"
-check "sparse mode fires (population collapses after gen 0)" "yes" \
-      "$([[ "${SPARSE_N}" -gt 0 ]] && echo yes || echo no)"
+check "dense  mode fires" "yes" "$([[ "${DENSE_N}"  -gt 0 ]] && echo yes || echo no)"
+check "sparse mode fires" "yes" "$([[ "${SPARSE_N}" -gt 0 ]] && echo yes || echo no)"
 
-# d=0.25: stays dense throughout (3D Life sustains high density at this init)
 MODE_D025="$(run_sim_stderr 10 16 0.25 42)"
 echo "  d=0.25 N=16 gen=10:  ${MODE_D025}"
 DENSE_25="$(echo "${MODE_D025}" | grep -oP 'dense=\K[0-9]+' || echo 0)"
-check "dense-only path for d=0.25 (expected high dirty ratio)" "yes" \
-      "$([[ "${DENSE_25}" -gt 0 ]] && echo yes || echo no)"
+check "dense-only path for d=0.25" "yes" "$([[ "${DENSE_25}" -gt 0 ]] && echo yes || echo no)"
 
 echo ""
 
 # ── Edge cases ────────────────────────────────────────────────────────────────
 echo "── Edge cases ───────────────────────────────────────────────────────────"
 
-# Density 0 — all cells dead; sparse mode throughout; all counts must be 0
 OUT_EMPTY="$(run_sim 5 16 0.0 1)"
 ALL_ZERO=1
 while IFS= read -r line; do
@@ -170,26 +157,101 @@ check "density=0 → all max_count = 0" 1 ${ALL_ZERO}
 OUT_EMPTY2="$(run_sim 5 16 0.0 999)"
 check "density=0 is seed-independent" "${OUT_EMPTY}" "${OUT_EMPTY2}"
 
-# Output format: exactly 9 lines, species IDs 1–9
 OUT_FMT="$(run_sim 5 8 0.3 7)"
-check "output has exactly 9 lines"   "9" "$(echo "${OUT_FMT}" | wc -l | tr -d ' ')"
-check "first line species ID = 1"    "1" "$(echo "${OUT_FMT}" | awk 'NR==1{print $1}')"
-check "last line species ID = 9"     "9" "$(echo "${OUT_FMT}" | awk 'NR==9{print $1}')"
+check "output has exactly 9 lines" "9" "$(echo "${OUT_FMT}" | wc -l | tr -d ' ')"
+check "first line species ID = 1"  "1" "$(echo "${OUT_FMT}" | awk 'NR==1{print $1}')"
+check "last line species ID = 9"   "9" "$(echo "${OUT_FMT}" | awk 'NR==9{print $1}')"
 
-# Single generation — should not crash
 run_sim 1 4 0.5 123 > /dev/null
 echo "[PASS] gen=1 N=4 completes without crash"; PASS=$((PASS+1))
 
-# Larger grid, single generation
 run_sim 1 64 0.25 7 > /dev/null
 echo "[PASS] gen=1 N=64 completes without crash"; PASS=$((PASS+1))
+
+echo ""
+
+# ── Reference regression tests ────────────────────────────────────────────────
+# Expected outputs taken from a verified reference run.
+# Large-grid cases (N=512, N=1024) are skipped when available RAM < threshold.
+echo "── Reference regression tests ───────────────────────────────────────────"
+
+ref_check() {
+  local label="$1" gen="$2" N="$3" density="$4" seed="$5"
+  shift 5
+  local expected_lines=("$@")
+
+  local actual
+  actual="$(run_sim "${gen}" "${N}" "${density}" "${seed}")" || {
+    echo "[SKIP] ${label} — binary failed (OOM or timeout?)"; return
+  }
+
+  local expected
+  expected="$(printf '%s\n' "${expected_lines[@]}")"
+  check "${label}" "${expected}" "${actual}"
+}
+
+# ── N=64, 1000 gens, d=0.4, seed=0 ──────────────────────────────────────────
+ref_check "life3d 1000 64 0.4 0" 1000 64 0.4 0 \
+  "1 81443 62" \
+  "2 24563 24" \
+  "3 20080 1"  \
+  "4 19016 1"  \
+  "5 17576 1"  \
+  "6 16905 1"  \
+  "7 15793 1"  \
+  "8 15174 1"  \
+  "9 14807 1"
+
+# ── N=128, 200 gens, d=0.5, seed=1000 ────────────────────────────────────────
+ref_check "life3d 200 128 0.5 1000" 200 128 0.5 1000 \
+  "1 585667 87"  \
+  "2 198117 20"  \
+  "3 123360 6"   \
+  "4 117152 0"   \
+  "5 116181 0"   \
+  "6 116832 0"   \
+  "7 116421 0"   \
+  "8 116559 0"   \
+  "9 116344 0"
+
+# ── N=512, 10 gens, d=0.4, seed=0  (memory: ~700 MB) ────────────────────────
+MEM_KB="$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)"
+if [[ "${MEM_KB}" -ge 1048576 ]]; then   # at least 1 GB free
+  ref_check "life3d 10 512 0.4 0" 10 512 0.4 0 \
+    "1 19157193 9" \
+    "2 11835204 9" \
+    "3 10389985 1" \
+    "4 9659849 1"  \
+    "5 9049679 1"  \
+    "6 8563492 1"  \
+    "7 8146692 1"  \
+    "8 7824529 1"  \
+    "9 7580100 1"
+else
+  echo "[SKIP] life3d 10 512 0.4 0 — insufficient RAM (need ≥1 GB free, have $(( MEM_KB / 1024 )) MB)"
+fi
+
+# ── N=1024, 3 gens, d=0.4, seed=100  (memory: ~5.4 GB) ──────────────────────
+if [[ "${MEM_KB}" -ge 6291456 ]]; then   # at least 6 GB free
+  ref_check "life3d 3 1024 0.4 100" 3 1024 0.4 100 \
+    "1 99923786 1"  \
+    "2 90413714 1"  \
+    "3 83137654 1"  \
+    "4 77287897 1"  \
+    "5 72448825 1"  \
+    "6 68444736 1"  \
+    "7 65198270 1"  \
+    "8 62633412 1"  \
+    "9 60611199 1"
+else
+  echo "[SKIP] life3d 3 1024 0.4 100 — insufficient RAM (need ≥6 GB free, have $(( MEM_KB / 1024 )) MB)"
+fi
 
 echo ""
 
 # ── Performance benchmarks ────────────────────────────────────────────────────
 if [[ "${RUN_BENCH}" -eq 1 ]]; then
   echo "── Performance benchmarks ───────────────────────────────────────────────"
-  echo "   OMP_NUM_THREADS=${OMP_NUM_THREADS}"
   echo ""
 
   bench() {

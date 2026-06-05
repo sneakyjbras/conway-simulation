@@ -1,12 +1,36 @@
 BasedOnStyle: LLVM
-Standard: Latest
+
 IndentWidth: 2
-ColumnLimit: 120
+TabWidth: 2
 UseTab: Never
-SortIncludes: true
-IncludeBlocks: Regroup
-BreakBeforeBraces: Attach
-AllowShortFunctionsOnASingleLine: Empty
-NamespaceIndentation: None
-AlignConsecutiveAssignments: Consecutive
+
+ColumnLimit: 100
+
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+
 PointerAlignment: Left
+SortIncludes: true
+
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignOperands: Align
+BreakBeforeBinaryOperators: NonAssignment
+
+AccessModifierOffset: -2
+IndentAccessModifiers: false
+
+ConstructorInitializerIndentWidth: 2
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: Never
+
+BinPackParameters: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+Standard: Latest
+Cpp11BracedListStyle: true

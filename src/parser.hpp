@@ -8,14 +8,16 @@
 #include <string>
 #include <string_view>
 
-struct SimulationConfig {
+struct SimulationConfig
+{
   std::uint64_t number_of_generations;
   std::uint64_t grid_dimension;
   float         initial_density;
   std::int32_t  random_seed;
 };
 
-class CommandLineParser {
+class CommandLineParser
+{
 public:
   [[nodiscard]] static auto usage_message() -> std::string_view;
 
@@ -29,7 +31,8 @@ private:
   static constexpr double        kMaximumDensityInclusive   = 1.0;
   static constexpr std::uint64_t kMinimumPositive           = 1;
 
-  enum class ArgumentIndex : std::uint8_t {
+  enum class ArgumentIndex : std::uint8_t
+  {
     Program       = 0,
     Generations   = 1,
     GridDimension = 2,
@@ -38,7 +41,7 @@ private:
   };
 
   template <class NumericType>
-  [[nodiscard]] static auto parse_scalar(std::string_view     text_to_parse,
-                                         std::int32_t integer_base = kDefaultIntegerParsingBase)
+  [[nodiscard]] static auto parse_scalar(std::string_view text_to_parse,
+                                         std::int32_t     integer_base = kDefaultIntegerParsingBase)
       -> std::expected<NumericType, std::string>;
 };

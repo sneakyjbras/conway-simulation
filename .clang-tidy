@@ -1,12 +1,10 @@
 Checks: >
-  -*,
+  clang-analyzer-*,
   bugprone-*,
   performance-*,
-  readability-*,
-  modernize-*,
-  clang-analyzer-*,
-  cppcoreguidelines-*
-
-WarningsAsErrors: ''
-HeaderFilterRegex: '.*'
+  portability-*,
+  -portability-simd-intrinsics
+WarningsAsErrors: '*'
 FormatStyle: file
+HeaderFilterRegex: '^src/.*$'
+...

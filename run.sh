@@ -6,7 +6,7 @@
 #
 # Examples:
 #   ./run.sh --clean -- 4 8 0.25 123
-#   ./run.sh --threads 8 -- 200 256 0.18 42
+#   ./run.sh -- 200 256 0.18 42
 
 set -euo pipefail
 
@@ -17,12 +17,12 @@ DEBUG_FLAG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --clean)   CLEAN=1;                        shift   ;;
-    --type)    BUILD_TYPE="${2:-Release}";     shift 2 ;;
-    --threads) THREADS="${2:-}";               shift 2 ;;
-    --debug)   DEBUG_FLAG="--debug";           shift   ;;
-    --)        shift; break                            ;;
-    *)         break                                   ;;
+    --clean)   CLEAN=1;                    shift   ;;
+    --type)    BUILD_TYPE="${2:-Release}"; shift 2 ;;
+    --threads) THREADS="${2:-}";           shift 2 ;;
+    --debug)   DEBUG_FLAG="--debug";      shift   ;;
+    --)        shift; break                        ;;
+    *)         break                               ;;
   esac
 done
 
@@ -31,7 +31,7 @@ if [[ $# -lt 4 ]]; then
   exit 1
 fi
 
-# Auto-detect thread count.
+# Auto-detect CPU thread count for cmake --build parallelism.
 if [[ -z "${THREADS}" ]]; then
   if command -v nproc >/dev/null 2>&1; then
     THREADS="$(nproc)"
@@ -60,5 +60,4 @@ echo "[run.sh] Building with ${THREADS} threads..."
 cmake --build . -j "${THREADS}"
 
 echo "[run.sh] Running: ./life3d $*"
-export OMP_NUM_THREADS="${THREADS}"
 ./life3d "$@"

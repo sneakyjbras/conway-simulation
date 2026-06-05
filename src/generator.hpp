@@ -8,7 +8,8 @@
 #include <cstdint>
 #include <vector>
 
-namespace generator {
+namespace generator
+{
 
 inline constexpr std::uint32_t N_SPECIES = 9;
 
