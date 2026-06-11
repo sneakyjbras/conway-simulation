@@ -34,8 +34,9 @@
 //    and processes only dirty cells within active tiles.
 //
 //    Mode dispatch in run():
-//      dirty_ratio > DENSE_THRESHOLD  →  step_generation_dense()
-//      dirty_ratio ≤ DENSE_THRESHOLD  →  step_generation_sparse()
+//      dual-threshold hysteresis with dirty_ratio and change_ratio
+//      kDense  → step_generation_dense()
+//      kSparse → step_generation_sparse()
 
 #include "debug_printer.hpp"
 #include "generator.hpp"
@@ -70,8 +71,10 @@ public:
 
 private:
   // ── Tuning constants ────────────────────────────────────────────────────
-  // Fraction of N³ cells that are dirty above which we use the full sweep.
-  static constexpr float DENSE_THRESHOLD = 0.60f;
+  static constexpr float ENTER_SPARSE_THRESHOLD = 0.50f; // dirty_ratio to enter sparse
+  static constexpr float EXIT_SPARSE_THRESHOLD  = 0.65f; // dirty_ratio to exit  sparse
+  static constexpr float ENTER_CHANGE_RATIO     = 0.05f; // change_ratio to enter sparse
+  static constexpr float EXIT_CHANGE_RATIO      = 0.10f; // change_ratio to exit  sparse
 
   // Edge length of each cubic tile (cells per axis).
   // 8³ = 512 cells per tile; fits comfortably in L1/L2 cache.
@@ -86,12 +89,12 @@ private:
   // ── Simulation phases ───────────────────────────────────────────────────
   void initialize_from_generator();
 
-  // Full O(N³) sweep — used when dirty_ratio > DENSE_THRESHOLD.
+  // Full O(N³) sweep — used when kDense.
   void step_generation_dense(const std::vector<unsigned char>&                    current,
                              std::vector<unsigned char>&                          next,
                              std::array<std::uint64_t, generator::N_SPECIES + 1>& counts) noexcept;
 
-  // Tile-skipping sparse sweep — used when dirty_ratio ≤ DENSE_THRESHOLD.
+  // Tile-skipping sparse sweep — used when kSparse.
   void step_generation_sparse(const std::vector<unsigned char>&                    current,
                               std::vector<unsigned char>&                          next,
                               std::array<std::uint64_t, generator::N_SPECIES + 1>& counts) noexcept;
@@ -101,6 +104,9 @@ private:
   void                rebuild_dirty_full() noexcept;
   void                rebuild_dirty_incremental() noexcept;
   void                rebuild_tile_set() noexcept;
+  void                rebuild_dirty_from_changes() noexcept;
+  void                update_tile_counts_from_changes() noexcept;
+  void                compute_initial_counts() noexcept;
 
   // ── Maxima tracking ─────────────────────────────────────────────────────
   void
@@ -124,12 +130,36 @@ private:
 
   // ── Dirty-set state ─────────────────────────────────────────────────────
   std::vector<std::uint8_t> dirty_;
-  std::vector<std::uint8_t> prev_dirty_;
   std::size_t               dirty_count_{0};
+
+  // ── Activity list ─────────────────────────────────────────────────────────
+  // Flat ghost-array indices of all dirty cells, maintained alongside dirty_[].
+  // Swapped with prev_dirty_indices_ at the start of each sparse rebuild pass.
+  std::vector<std::ptrdiff_t> dirty_indices_;
+  std::vector<std::ptrdiff_t> prev_dirty_indices_;
+
+  // ── Changes vector ─────────────────────────────────────────────────────────
+  // Populated only during step_generation_sparse(). Each entry is
+  // {flat_ghost_idx, new_value} for cells whose value actually changed this step.
+  // Empty after dense steps.
+  std::vector<std::pair<std::ptrdiff_t, unsigned char>> changes_;
+
+  // ── Running species counts ─────────────────────────────────────────────────
+  // Maintained incrementally in sparse mode; resynced from step output in dense mode.
+  std::array<std::uint64_t, generator::N_SPECIES + 1> current_counts_{};
+
+  // ── Tile alive counts ──────────────────────────────────────────────────────
+  // Number of alive cells inside each tile; same flat indexing as tile_active_.
+  // Updated incrementally from changes_ in sparse mode.
+  std::vector<std::uint32_t> tile_alive_count_;
 
   // ── Tile active-set ─────────────────────────────────────────────────────
   int                       tiles_per_axis_{0};
   std::vector<std::uint8_t> tile_active_;
+
+  // ── Mode state ────────────────────────────────────────────────────────────
+  enum class Mode : std::uint8_t { kDense, kSparse };
+  Mode mode_{Mode::kDense};
 
   // ── Maxima ──────────────────────────────────────────────────────────────
   std::array<std::uint64_t, generator::N_SPECIES + 1> max_count_{};

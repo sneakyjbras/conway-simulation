@@ -143,7 +143,38 @@ check "dense-only path for d=0.25" "yes" "$([[ "${DENSE_25}" -gt 0 ]] && echo ye
 
 echo ""
 
-# ── Edge cases ────────────────────────────────────────────────────────────────
+# ── Groups 5–8: activity list, incremental counts, hysteresis ─────────────────
+echo "── Groups 5–8 optimisation checks ──────────────────────────────────────"
+
+# T1: Activity-list (dirty_indices_) sanity.
+# d=0.0 → dirty_count=0 → dirty_ratio=0 ≤ ENTER_SPARSE_THRESHOLD(0.50), so
+# Group 8 dispatch switches to sparse from the very first generation.
+# Expected: dense=0 in the mode line.
+T1_MODE="$(run_sim_stderr 10 16 0.0 1)"
+T1_DENSE="$(echo "${T1_MODE}" | grep -oP 'dense=\K[0-9]+' || echo -1)"
+check "T1 empty activity list: d=0.0 uses sparse-only path (dense=0)" "0" "${T1_DENSE}"
+
+# T2: Incremental species-count determinism (Group 7).
+# Two independent runs with the same seed must produce bit-identical output
+# even after many sparse steps where current_counts_ is updated incrementally.
+# Uses a parameter set not covered by the existing determinism checks.
+T2_A="$(run_sim 50 32 0.08 77)"
+T2_B="$(run_sim 50 32 0.08 77)"
+check "T2 incremental counts deterministic (d=0.08 seed=77 gen=50)" "${T2_A}" "${T2_B}"
+
+# T3: Hysteresis threshold constants (Group 8).
+# The mode line must carry the spec values: ENTER=50%/EXIT=65% for dirty ratio
+# and ENTER=5%/EXIT=10% for change ratio.  This catches accidental threshold
+# corruption (e.g. a stray sed that zeroes or inflates a constant).
+T3_MODE="$(run_sim_stderr 100 32 0.08 42)"
+check "T3 hysteresis: dirty_thr=50%/65% in mode line" "yes" \
+  "$( echo "${T3_MODE}" | grep -q 'dirty_thr=50%/65%' && echo yes || echo no)"
+check "T3 hysteresis: churn_thr=5%/10% in mode line" "yes" \
+  "$( echo "${T3_MODE}" | grep -q 'churn_thr=5%/10%' && echo yes || echo no)"
+
+echo ""
+
+
 echo "── Edge cases ───────────────────────────────────────────────────────────"
 
 OUT_EMPTY="$(run_sim 5 16 0.0 1)"
