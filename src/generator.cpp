@@ -52,8 +52,11 @@ float r4_uni() noexcept
 // Bit-for-bit identical to the original implementation: same x-outer/z-inner
 // iteration order and same RNG call sequence.  Do not modify — the golden
 // regression files depend on this exact sequence.
-void fill_uniform(std::vector<unsigned char>& grid, std::uint64_t N, float density) noexcept
+void fill_uniform(std::vector<unsigned char>& grid, const GridSpec& spec) noexcept
 {
+  const std::uint64_t N       = spec.grid_dimension;
+  const float         density = spec.density;
+
   for (std::uint64_t x = 0; x < N; ++x)
     for (std::uint64_t y = 0; y < N; ++y)
       for (std::uint64_t z = 0; z < N; ++z)
@@ -77,8 +80,11 @@ void fill_uniform(std::vector<unsigned char>& grid, std::uint64_t N, float densi
 // This produces a spikier alive distribution than uniform — denser core,
 // sparser edges — which is the case the larger Gaussian scratch-reserve factor
 // is designed to absorb.
-void fill_gaussian(std::vector<unsigned char>& grid, std::uint64_t N, float density) noexcept
+void fill_gaussian(std::vector<unsigned char>& grid, const GridSpec& spec) noexcept
 {
+  const std::uint64_t N       = spec.grid_dimension;
+  const float         density = spec.density;
+
   const float center  = 0.5f * static_cast<float>(N - 1);
   const float sigma   = 0.25f * static_cast<float>(N); // cluster radius ≈ N/4
   const float inv_2s2 = (sigma > 0.0f) ? 1.0f / (2.0f * sigma * sigma) : 0.0f;
@@ -107,26 +113,26 @@ void fill_gaussian(std::vector<unsigned char>& grid, std::uint64_t N, float dens
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-std::vector<unsigned char>
-gen_initial_grid(std::uint64_t N, float density, std::int32_t input_seed, DistributionType dist)
+std::vector<unsigned char> gen_initial_grid(const GridSpec& spec)
 {
   // Flat layout: cell(x, y, z) = grid[z*N*N + y*N + x]
   // (Same z-major order used by the Simulation class so the copy-in is a
   // simple element-wise transfer without any axis permutation.)
+  const auto        N = spec.grid_dimension;
   const std::size_t total =
       static_cast<std::size_t>(N) * static_cast<std::size_t>(N) * static_cast<std::size_t>(N);
   std::vector<unsigned char> grid(total, 0);
 
-  init_r4uni(input_seed);
+  init_r4uni(spec.seed);
 
-  switch (dist)
+  switch (spec.distribution)
   {
   case DistributionType::kGaussian:
-    fill_gaussian(grid, N, density);
+    fill_gaussian(grid, spec);
     break;
   case DistributionType::kUniform:
   default:
-    fill_uniform(grid, N, density);
+    fill_uniform(grid, spec);
     break;
   }
 

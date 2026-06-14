@@ -9,9 +9,11 @@
 
 #include <algorithm>
 
-DirtySet::DirtySet(std::size_t ghost_volume, std::size_t estimated_dirty, const GridGeometry& geom)
+DirtySet::DirtySet(std::size_t estimated_dirty, const GridGeometry& geom)
   : geom_(geom)
-  , dirty_(ghost_volume, std::uint8_t{0})
+  , dirty_(static_cast<std::size_t>(geom.n + 2) * static_cast<std::size_t>(geom.n + 2)
+               * static_cast<std::size_t>(geom.n + 2),
+           std::uint8_t{0})
 {
   dirty_indices_.reserve(estimated_dirty);
   prev_dirty_indices_.reserve(estimated_dirty);

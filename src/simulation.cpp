@@ -94,16 +94,17 @@ constexpr int           N_S  = static_cast<int>(generator::N_SPECIES);
 // Estimate the index-list reserve for the dirty set: the alive estimate
 // (density × N³ × distribution factor) doubled for the neighbour shell, then
 // clamped to N³.  Mirrors the scratch-sizing rationale in params.hpp.
-[[nodiscard]] std::size_t estimate_dirty_reserve(int                N,
-                                                 float              density,
-                                                 const AllocConfig& alloc,
-                                                 DistributionType   dist) noexcept
+// Takes the whole SimulationParams (rather than separate N/density scalars,
+// which clang-tidy flags as an easily-swapped convertible pair).
+[[nodiscard]] std::size_t estimate_dirty_reserve(const SimulationParams& params) noexcept
 {
-  const auto n3 =
-      static_cast<std::size_t>(N) * static_cast<std::size_t>(N) * static_cast<std::size_t>(N);
-  const float factor         = (dist == DistributionType::kGaussian) ? alloc.gaussian_reserve_factor
-                                                                     : alloc.uniform_reserve_factor;
-  const auto  expected_alive = static_cast<std::size_t>(static_cast<float>(n3) * density * factor);
+  const auto  N      = static_cast<std::size_t>(params.problem.grid_dimension);
+  const auto  n3     = N * N * N;
+  const float factor = (params.distribution == DistributionType::kGaussian)
+                           ? params.alloc.gaussian_reserve_factor
+                           : params.alloc.uniform_reserve_factor;
+  const auto  expected_alive =
+      static_cast<std::size_t>(static_cast<float>(n3) * params.density * factor);
   return std::min(expected_alive * 2, n3);
 }
 
@@ -148,9 +149,7 @@ Simulation::Simulation(const SimulationParams& params)
               * static_cast<std::size_t>(ghost_dim_),
           DEAD)
   , next_grid_(grid_.size(), DEAD)
-  , dirty_set_(grid_.size(),
-               estimate_dirty_reserve(grid_dimension_, density_, alloc_, distribution_),
-               geom_)
+  , dirty_set_(estimate_dirty_reserve(params), geom_)
   , tile_set_(static_cast<std::uint32_t>(grid_dimension_), geom_)
   , debug_printer_(false)
 {
@@ -204,8 +203,11 @@ std::size_t Simulation::cell_idx(int x, int y, int z) const noexcept
 
 void Simulation::initialize_from_generator()
 {
-  const auto src = generator::gen_initial_grid(static_cast<std::uint64_t>(grid_dimension_),
-                                               density_, seed_, distribution_);
+  const auto src =
+      generator::gen_initial_grid({.grid_dimension = static_cast<std::uint64_t>(grid_dimension_),
+                                   .density        = density_,
+                                   .seed           = seed_,
+                                   .distribution   = distribution_});
 
   const std::size_t N  = static_cast<std::size_t>(grid_dimension_);
   const std::size_t N2 = N * N;
@@ -569,8 +571,7 @@ void Simulation::run()
   for (int gen = 0; gen <= generations_; ++gen)
   {
     debug_printer_.print_generation(static_cast<std::uint64_t>(gen), grid_,
-                                    static_cast<std::uint64_t>(grid_dimension_),
-                                    static_cast<std::uint64_t>(ghost_dim_));
+                                    static_cast<std::uint64_t>(grid_dimension_));
 
     std::array<std::uint64_t, generator::N_SPECIES + 1> counts{};
     counts.fill(0);
@@ -589,7 +590,8 @@ void Simulation::run()
     // the chaos metric and cooling schedule before this generation's dispatch.
     if (annealing_ctrl_)
     {
-      thresholds_  = annealing_ctrl_->step(cr, static_cast<std::uint32_t>(gen));
+      thresholds_ = annealing_ctrl_->step(
+          {.change_ratio = cr, .generation = static_cast<std::uint32_t>(gen)});
       sa_enter_min = std::min(sa_enter_min, thresholds_.enter_sparse);
       sa_enter_max = std::max(sa_enter_max, thresholds_.enter_sparse);
     }

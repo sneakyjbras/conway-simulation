@@ -43,10 +43,17 @@ public:
   AnnealingController(const AnnealingParams&    params,
                       const DispatchThresholds& base_thresholds) noexcept;
 
-  // Advance one generation.  `change_ratio` is the fraction of cells that
-  // changed in the previous step (changes / N³); `gen` is the 0-based
-  // generation index.  Returns the thresholds to use for this generation.
-  [[nodiscard]] DispatchThresholds step(float change_ratio, std::uint32_t gen) noexcept;
+  // Per-generation observation fed to step().  Bundled into a struct (rather
+  // than two adjacent scalar parameters) so the float change_ratio and the
+  // std::uint32_t generation index cannot be swapped at a call site.
+  struct Observation
+  {
+    float         change_ratio; // fraction of cells that changed last step
+    std::uint32_t generation;   // 0-based generation index
+  };
+
+  // Advance one generation.  Returns the thresholds to use for this generation.
+  [[nodiscard]] DispatchThresholds step(const Observation& obs) noexcept;
 
   // Current chaos metric (EMA of change_ratio) — exposed for diagnostics.
   [[nodiscard]] float chaos() const noexcept

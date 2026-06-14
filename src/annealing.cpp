@@ -16,25 +16,25 @@ AnnealingController::AnnealingController(const AnnealingParams&    params,
 {
 }
 
-DispatchThresholds AnnealingController::step(float change_ratio, std::uint32_t gen) noexcept
+DispatchThresholds AnnealingController::step(const Observation& obs) noexcept
 {
   // ── Update the chaos metric (EMA of change_ratio) ─────────────────────────
   // Prime the average on the first observation so it starts at the true value
   // rather than decaying up from zero.
   if (!primed_)
   {
-    ema_chaos_ = change_ratio;
+    ema_chaos_ = obs.change_ratio;
     primed_    = true;
   }
   else
   {
-    ema_chaos_ = ema_alpha_ * change_ratio + (1.0f - ema_alpha_) * ema_chaos_;
+    ema_chaos_ = ema_alpha_ * obs.change_ratio + (1.0f - ema_alpha_) * ema_chaos_;
   }
 
   // ── Cooling temperature ───────────────────────────────────────────────────
   // Exponential decay from t_initial, floored at t_final.
   const float raw_temp =
-      params_.t_initial * std::exp(-params_.cooling_rate * static_cast<float>(gen));
+      params_.t_initial * std::exp(-params_.cooling_rate * static_cast<float>(obs.generation));
   const float temperature = std::clamp(raw_temp, params_.t_final, params_.t_initial);
 
   // ── Threshold adjustment ──────────────────────────────────────────────────

@@ -8,6 +8,29 @@
 
 #include <algorithm>
 
+namespace
+{
+
+// Flat tile index from 3D tile coordinates.  Promotes to std::size_t before
+// the multiply-add (rather than casting the already-computed int result), so
+// the widening happens before any possible overflow in the index arithmetic.
+// 3D tile-grid coordinate, bundled into a struct so it isn't three adjacent
+// same-type int parameters (which clang-tidy flags as easily swapped).
+struct TileCoord
+{
+  int tz;
+  int ty;
+  int tx;
+};
+
+[[nodiscard]] std::size_t tile_index(const TileCoord& coord, std::size_t tpa) noexcept
+{
+  return (static_cast<std::size_t>(coord.tz) * tpa + static_cast<std::size_t>(coord.ty)) * tpa
+         + static_cast<std::size_t>(coord.tx);
+}
+
+} // namespace
+
 TileSet::TileSet(std::uint32_t grid_dimension, const GridGeometry& geom)
   : geom_(geom)
   , tiles_per_axis_((static_cast<int>(grid_dimension) + TILE_DIM - 1) / TILE_DIM)
@@ -39,7 +62,7 @@ void TileSet::rebuild(const std::vector<std::ptrdiff_t>& dirty_indices) noexcept
     const int            tz  = (static_cast<int>(gz) - 1) / TILE_DIM;
     const int            ty  = (static_cast<int>(gy) - 1) / TILE_DIM;
     const int            tx  = (static_cast<int>(gx) - 1) / TILE_DIM;
-    tile_active_[static_cast<std::size_t>(tz * tpa * tpa + ty * tpa + tx)] = 1;
+    tile_active_[tile_index({tz, ty, tx}, static_cast<std::size_t>(tpa))] = 1;
   }
 }
 
@@ -64,7 +87,7 @@ void TileSet::update_counts_from_changes(const ChangesVector& changes) noexcept
     const int            tz  = (static_cast<int>(gz) - 1) / TILE_DIM;
     const int            ty  = (static_cast<int>(gy) - 1) / TILE_DIM;
     const int            tx  = (static_cast<int>(gx) - 1) / TILE_DIM;
-    const auto           ti  = static_cast<std::size_t>(tz * tpa * tpa + ty * tpa + tx);
+    const auto           ti  = tile_index({tz, ty, tx}, static_cast<std::size_t>(tpa));
 
     if (nv == DEAD_CELL)
       --tile_alive_count_[ti]; // death
@@ -98,7 +121,7 @@ void TileSet::init_counts_from_grid(const unsigned char* grid) noexcept
         const int tz = z / TILE_DIM;
         const int ty = y / TILE_DIM;
         const int tx = x / TILE_DIM;
-        ++tile_alive_count_[static_cast<std::size_t>(tz * tpa * tpa + ty * tpa + tx)];
+        ++tile_alive_count_[tile_index({tz, ty, tx}, static_cast<std::size_t>(tpa))];
       }
     }
   }

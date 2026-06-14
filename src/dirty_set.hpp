@@ -31,9 +31,11 @@
 class DirtySet
 {
 public:
-  // ghost_volume   = (N+2)^3, the size of the dirty byte map.
-  // estimated_dirty= reserve hint for the index lists.
-  DirtySet(std::size_t ghost_volume, std::size_t estimated_dirty, const GridGeometry& geom);
+  // estimated_dirty = reserve hint for the index lists.  ghost_volume — the
+  // size of the dirty byte map — is derived internally as (geom.n + 2)^3
+  // rather than taken as a second std::size_t parameter, avoiding an
+  // easily-swapped same-type pair.
+  DirtySet(std::size_t estimated_dirty, const GridGeometry& geom);
 
   // ── Rebuild strategies ────────────────────────────────────────────────────
   void rebuild_full(const unsigned char* grid) noexcept;

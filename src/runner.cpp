@@ -13,7 +13,13 @@
 #include <utility>
 
 #ifdef _OPENMP
-#include <omp.h>
+// omp_get_wtime() is declared via extern "C" rather than #include <omp.h>.
+// The function is provided by libgomp (linked via -fopenmp) regardless of
+// whether the system's omp.h is on the toolchain's include path — this avoids
+// a hard dependency on the OpenMP runtime headers, which can be absent or
+// unresolvable from certain analysis toolchains even when libgomp itself is
+// present and linkable.
+extern "C" double omp_get_wtime(void);
 #else
 #include <chrono>
 #endif
