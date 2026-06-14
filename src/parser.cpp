@@ -11,8 +11,8 @@ namespace
 {
 
 template <class T>
-[[nodiscard]] auto parse_float_or_int(std::string_view text_to_parse, int base_if_int)
-    -> std::expected<T, std::string>
+[[nodiscard]] auto parse_float_or_int(std::string_view text_to_parse,
+                                      int              base_if_int) -> std::expected<T, std::string>
 {
   T           value{};
   const char* first = text_to_parse.data();

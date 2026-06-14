@@ -24,7 +24,12 @@ int main(int argc, char* argv[])
     auto parsed = CommandLineParser::parse(arguments);
     if (!parsed)
     {
-      std::fprintf(stderr, "%s\nError: %s\n", CommandLineParser::usage_message().data(),
+      // usage_message() returns a std::string_view, which printf's %s cannot
+      // safely consume via .data() alone (no null-termination guarantee).
+      // %.*s with an explicit length is the correct way to print a
+      // string_view through the printf family.
+      const auto usage = CommandLineParser::usage_message();
+      std::fprintf(stderr, "%.*s\nError: %s\n", static_cast<int>(usage.size()), usage.data(),
                    parsed.error().c_str());
       return EXIT_FAILURE;
     }
