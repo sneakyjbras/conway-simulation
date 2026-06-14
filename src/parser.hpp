@@ -51,8 +51,8 @@ class CommandLineParser
 public:
   [[nodiscard]] static auto usage_message() -> std::string_view;
 
-  [[nodiscard]] static auto
-  parse(std::span<char* const> raw_arguments) -> std::expected<SimulationConfig, std::string>;
+  [[nodiscard]] static auto parse(std::span<char* const> raw_arguments)
+      -> std::expected<SimulationConfig, std::string>;
 
 private:
   static constexpr std::int32_t  kMinimumArgumentCount      = 5;
