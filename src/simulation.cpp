@@ -72,6 +72,41 @@ namespace
 constexpr unsigned char DEAD = 0;
 constexpr int           N_S  = static_cast<int>(generator::N_SPECIES);
 
+// Build the 26 signed flat neighbour offsets for a ghost-padded grid.
+// Order is the canonical dz,dy,dx scan with the self-cell (0,0,0) skipped.
+[[nodiscard]] std::array<std::ptrdiff_t, 26> make_neighbor_offsets(std::ptrdiff_t stride_y,
+                                                                   std::ptrdiff_t stride_z) noexcept
+{
+  std::array<std::ptrdiff_t, 26> offs{};
+  std::size_t                    k = 0;
+  for (int dz = -1; dz <= 1; ++dz)
+    for (int dy = -1; dy <= 1; ++dy)
+      for (int dx = -1; dx <= 1; ++dx)
+      {
+        if (dx == 0 && dy == 0 && dz == 0)
+          continue;
+        offs[k++] = static_cast<std::ptrdiff_t>(dz) * stride_z
+                    + static_cast<std::ptrdiff_t>(dy) * stride_y + static_cast<std::ptrdiff_t>(dx);
+      }
+  return offs;
+}
+
+// Estimate the index-list reserve for the dirty set: the alive estimate
+// (density × N³ × distribution factor) doubled for the neighbour shell, then
+// clamped to N³.  Mirrors the scratch-sizing rationale in params.hpp.
+[[nodiscard]] std::size_t estimate_dirty_reserve(int                N,
+                                                 float              density,
+                                                 const AllocConfig& alloc,
+                                                 DistributionType   dist) noexcept
+{
+  const auto n3 =
+      static_cast<std::size_t>(N) * static_cast<std::size_t>(N) * static_cast<std::size_t>(N);
+  const float factor         = (dist == DistributionType::kGaussian) ? alloc.gaussian_reserve_factor
+                                                                     : alloc.uniform_reserve_factor;
+  const auto  expected_alive = static_cast<std::size_t>(static_cast<float>(n3) * density * factor);
+  return std::min(expected_alive * 2, n3);
+}
+
 // Return the species with the highest count in sp[1..N_SPECIES].
 // Tie-break: lowest species ID wins.  Returns 0 if all counts are zero.
 [[nodiscard]] inline int
@@ -95,56 +130,58 @@ pick_majority_species(const std::array<int, generator::N_SPECIES + 1>& sp) noexc
 
 // ── Construction ─────────────────────────────────────────────────────────────
 
-Simulation::Simulation(int   number_of_generations,
-                       int   grid_dimension,
-                       float initial_density,
-                       int   random_seed)
-  : grid_dimension_(grid_dimension)
-  , ghost_dim_(grid_dimension + 2)
-  , generations_(number_of_generations)
-  , density_(initial_density)
-  , seed_(static_cast<std::int32_t>(random_seed))
+Simulation::Simulation(const SimulationParams& params)
+  : grid_dimension_(static_cast<int>(params.problem.grid_dimension))
+  , ghost_dim_(static_cast<int>(params.problem.grid_dimension) + 2)
+  , generations_(static_cast<int>(params.problem.generations))
+  , density_(params.density)
+  , seed_(params.seed)
+  , thresholds_(params.thresholds)
+  , alloc_(params.alloc)
+  , distribution_(params.distribution)
+  , annealing_params_(params.annealing)
   , stride_y_(static_cast<std::ptrdiff_t>(ghost_dim_))
   , stride_z_(static_cast<std::ptrdiff_t>(ghost_dim_) * static_cast<std::ptrdiff_t>(ghost_dim_))
+  , neighbor_offsets_(make_neighbor_offsets(stride_y_, stride_z_))
+  , geom_{stride_y_, stride_z_, static_cast<std::ptrdiff_t>(grid_dimension_), neighbor_offsets_}
   , grid_(static_cast<std::size_t>(ghost_dim_) * static_cast<std::size_t>(ghost_dim_)
               * static_cast<std::size_t>(ghost_dim_),
           DEAD)
   , next_grid_(grid_.size(), DEAD)
-  , dirty_(grid_.size(), 0)
-  , tiles_per_axis_((grid_dimension_ + TILE_DIM - 1) / TILE_DIM)
-  , tile_active_(static_cast<std::size_t>(tiles_per_axis_)
-                     * static_cast<std::size_t>(tiles_per_axis_)
-                     * static_cast<std::size_t>(tiles_per_axis_),
-                 0)
+  , dirty_set_(grid_.size(),
+               estimate_dirty_reserve(grid_dimension_, density_, alloc_, distribution_),
+               geom_)
+  , tile_set_(static_cast<std::uint32_t>(grid_dimension_), geom_)
   , debug_printer_(false)
 {
-  // ── Precompute the 26 neighbour offsets ─────────────────────────────────
-  std::size_t k = 0;
-  for (int dz = -1; dz <= 1; ++dz)
-    for (int dy = -1; dy <= 1; ++dy)
-      for (int dx = -1; dx <= 1; ++dx)
-      {
-        if (dx == 0 && dy == 0 && dz == 0)
-          continue;
-        neighbor_offsets_[k++] = static_cast<std::ptrdiff_t>(dz) * stride_z_
-                                 + static_cast<std::ptrdiff_t>(dy) * stride_y_
-                                 + static_cast<std::ptrdiff_t>(dx);
-      }
-  assert(k == 26);
-
   max_count_.fill(0);
   max_gen_.fill(0);
   current_counts_.fill(0);
 
-  // Size tile_alive_count_ to match tile_active_.
-  tile_alive_count_.assign(tile_active_.size(), std::uint32_t{0});
+  // ── Scratch-vector pre-allocation ───────────────────────────────────────
+  // Reserve changes_ once, here, so no reallocation can occur inside run().
+  // Unlike the grid vectors (fixed problem volume N³), the scratch vectors
+  // track the state distribution: their working size scales with the number of
+  // alive/dirty cells.  The factor provides headroom for distribution
+  // spikiness — uniform 1.5×, Gaussian 3.0× (both tunable via AllocConfig).
+  // The dirty-set index lists are reserved inside DirtySet's constructor using
+  // the same estimate.
+  const auto n3 = static_cast<std::size_t>(grid_dimension_)
+                  * static_cast<std::size_t>(grid_dimension_)
+                  * static_cast<std::size_t>(grid_dimension_);
 
-  // Reserve activity-list vectors as a sizing hint (N³/8).
-  const auto n3_over8 = static_cast<std::size_t>(grid_dimension_)
-                        * static_cast<std::size_t>(grid_dimension_)
-                        * static_cast<std::size_t>(grid_dimension_) / 8;
-  dirty_indices_.reserve(n3_over8);
-  prev_dirty_indices_.reserve(n3_over8);
+  const float reserve_factor = (distribution_ == DistributionType::kGaussian)
+                                   ? alloc_.gaussian_reserve_factor
+                                   : alloc_.uniform_reserve_factor;
+
+  const auto expected_alive =
+      static_cast<std::size_t>(static_cast<float>(n3) * density_ * reserve_factor);
+  changes_.reserve(expected_alive);
+
+  // Construct the annealing controller only when enabled.  When disabled the
+  // pointer stays null and run() uses the static thresholds unchanged.
+  if (annealing_params_.enabled)
+    annealing_ctrl_ = std::make_unique<AnnealingController>(annealing_params_, thresholds_);
 
   initialize_from_generator();
 }
@@ -167,8 +204,8 @@ std::size_t Simulation::cell_idx(int x, int y, int z) const noexcept
 
 void Simulation::initialize_from_generator()
 {
-  const auto src =
-      generator::gen_initial_grid(static_cast<std::uint64_t>(grid_dimension_), density_, seed_);
+  const auto src = generator::gen_initial_grid(static_cast<std::uint64_t>(grid_dimension_),
+                                               density_, seed_, distribution_);
 
   const std::size_t N  = static_cast<std::size_t>(grid_dimension_);
   const std::size_t N2 = N * N;
@@ -179,7 +216,7 @@ void Simulation::initialize_from_generator()
       {
         const std::size_t src_idx = static_cast<std::size_t>(z) * N2
                                     + static_cast<std::size_t>(y) * N + static_cast<std::size_t>(x);
-        grid_[cell_idx(x, y, z)]  = src[src_idx];
+        grid_[cell_idx(x, y, z)] = src[src_idx];
       }
 
   fill_ghost_cells(grid_);
@@ -188,19 +225,7 @@ void Simulation::initialize_from_generator()
   compute_initial_counts();
 
   // Initialise per-tile alive-cell counts from the initial grid.
-  std::fill(tile_alive_count_.begin(), tile_alive_count_.end(), std::uint32_t{0});
-  for (int z = 0; z < grid_dimension_; ++z)
-    for (int y = 0; y < grid_dimension_; ++y)
-      for (int x = 0; x < grid_dimension_; ++x)
-      {
-        if (grid_[cell_idx(x, y, z)] == DEAD)
-          continue;
-        const int tz = z / TILE_DIM;
-        const int ty = y / TILE_DIM;
-        const int tx = x / TILE_DIM;
-        const int ti = tz * tiles_per_axis_ * tiles_per_axis_ + ty * tiles_per_axis_ + tx;
-        ++tile_alive_count_[static_cast<std::size_t>(ti)];
-      }
+  tile_set_.init_counts_from_grid(grid_.data());
 }
 
 // ── Ghost-cell fill ───────────────────────────────────────────────────────────
@@ -267,273 +292,6 @@ void Simulation::compute_initial_counts() noexcept
       }
 }
 
-// ── Dirty-set: full rebuild ───────────────────────────────────────────────────
-
-void Simulation::rebuild_dirty_full() noexcept
-{
-  const int   N    = grid_dimension_;
-  const auto* g    = grid_.data();
-  const auto* offs = neighbor_offsets_.data();
-
-  std::fill(dirty_.begin(), dirty_.end(), std::uint8_t{0});
-  dirty_count_ = 0;
-  dirty_indices_.clear();
-
-  for (int z = 0; z < N; ++z)
-  {
-    const std::ptrdiff_t z_base = static_cast<std::ptrdiff_t>(z + 1) * stride_z_;
-    for (int y = 0; y < N; ++y)
-    {
-      const std::ptrdiff_t row = z_base + static_cast<std::ptrdiff_t>(y + 1) * stride_y_ + 1;
-      for (int x = 0; x < N; ++x)
-      {
-        const std::ptrdiff_t idx = row + static_cast<std::ptrdiff_t>(x);
-
-        bool d = (g[idx] != DEAD);
-        if (!d)
-          for (int k = 0; k < 26 && !d; ++k)
-            d = (g[idx + offs[k]] != DEAD);
-
-        const std::uint8_t flag               = d ? std::uint8_t{1} : std::uint8_t{0};
-        dirty_[static_cast<std::size_t>(idx)] = flag;
-        dirty_count_ += flag;
-        if (flag)
-          dirty_indices_.push_back(idx);
-      }
-    }
-  }
-}
-
-// ── Dirty-set: incremental rebuild ───────────────────────────────────────────
-// O(D × 27) algorithm using prev_dirty_indices_.
-//
-// A cell can only become dirty if IT or one of its 26 neighbours was dirty
-// last generation.  So we iterate prev_dirty_indices_, mark the cell itself
-// and each of its 26 neighbours (if they qualify), catching all newly-born
-// cells that the old filter-based stub missed.
-//
-// Bounds check: neighbor arithmetic can produce ghost-cell flat indices
-// (gz/gy/gx outside [1,N]).  Ghost cells must not be added to dirty_indices_.
-
-void Simulation::rebuild_dirty_incremental() noexcept
-{
-  const auto* g    = grid_.data();
-  const auto* offs = neighbor_offsets_.data();
-  const auto  N_   = static_cast<std::ptrdiff_t>(grid_dimension_);
-
-  // Clear dirty_ for every cell that was dirty last generation.
-  for (std::ptrdiff_t idx : prev_dirty_indices_)
-    dirty_[static_cast<std::size_t>(idx)] = 0;
-
-  dirty_count_ = 0;
-  dirty_indices_.clear();
-
-  // Mark idx as dirty if it qualifies.
-  // Ghost cell indices are remapped to their logical toroidal equivalents rather
-  // than silently dropped — this is the fix for the boundary-wrap bug.
-  auto mark_if_dirty = [&](std::ptrdiff_t idx)
-  {
-    if (dirty_[static_cast<std::size_t>(idx)])
-      return; // already marked this pass
-
-    const std::ptrdiff_t gz  = idx / stride_z_;
-    const std::ptrdiff_t rem = idx - gz * stride_z_;
-    const std::ptrdiff_t gy  = rem / stride_y_;
-    const std::ptrdiff_t gx  = rem - gy * stride_y_;
-
-    // Ghost cell → redirect to the toroidal logical equivalent.
-    if (gz < 1 || gz > N_ || gy < 1 || gy > N_ || gx < 1 || gx > N_)
-    {
-      const std::ptrdiff_t lgz = (gz < 1) ? N_ : (gz > N_) ? std::ptrdiff_t(1) : gz;
-      const std::ptrdiff_t lgy = (gy < 1) ? N_ : (gy > N_) ? std::ptrdiff_t(1) : gy;
-      const std::ptrdiff_t lgx = (gx < 1) ? N_ : (gx > N_) ? std::ptrdiff_t(1) : gx;
-      idx = lgz * stride_z_ + lgy * stride_y_ + lgx;
-      if (dirty_[static_cast<std::size_t>(idx)])
-        return;
-    }
-
-    bool d = (g[idx] != DEAD);
-    if (!d)
-      for (int k = 0; k < 26 && !d; ++k)
-        d = (g[idx + offs[k]] != DEAD);
-
-    if (d)
-    {
-      dirty_[static_cast<std::size_t>(idx)] = 1;
-      ++dirty_count_;
-      dirty_indices_.push_back(idx);
-    }
-  };
-
-  for (std::ptrdiff_t idx : prev_dirty_indices_)
-  {
-    mark_if_dirty(idx);
-    for (int k = 0; k < 26; ++k)
-      mark_if_dirty(idx + offs[k]);
-  }
-}
-
-// ── Tile active-set ───────────────────────────────────────────────────────────
-
-void Simulation::rebuild_tile_set() noexcept
-{
-  const int tpa = tiles_per_axis_;
-
-  std::fill(tile_active_.begin(), tile_active_.end(), std::uint8_t{0});
-
-  // O(D): mark the tile containing each dirty cell as active.
-  for (std::ptrdiff_t idx : dirty_indices_)
-  {
-    const std::ptrdiff_t gz  = idx / stride_z_;
-    const std::ptrdiff_t rem = idx - gz * stride_z_;
-    const std::ptrdiff_t gy  = rem / stride_y_;
-    const std::ptrdiff_t gx  = rem - gy * stride_y_;
-    const int tz = (static_cast<int>(gz) - 1) / TILE_DIM;
-    const int ty = (static_cast<int>(gy) - 1) / TILE_DIM;
-    const int tx = (static_cast<int>(gx) - 1) / TILE_DIM;
-    tile_active_[static_cast<std::size_t>(tz * tpa * tpa + ty * tpa + tx)] = 1;
-  }
-}
-
-// ── update_tile_counts_from_changes ──────────────────────────────────────────
-// Applies changes_ delta to tile_alive_count_ after each sparse step.
-// O(|changes|): only touches tiles that had a cell-state transition.
-
-void Simulation::update_tile_counts_from_changes() noexcept
-{
-  const int tpa = tiles_per_axis_;
-
-  for (const auto& entry : changes_)
-  {
-    const std::ptrdiff_t idx = entry.first;
-    const unsigned char  nv  = entry.second;
-
-    const std::ptrdiff_t gz  = idx / stride_z_;
-    const std::ptrdiff_t rem = idx - gz * stride_z_;
-    const std::ptrdiff_t gy  = rem / stride_y_;
-    const std::ptrdiff_t gx  = rem - gy * stride_y_;
-    const int tz = (static_cast<int>(gz) - 1) / TILE_DIM;
-    const int ty = (static_cast<int>(gy) - 1) / TILE_DIM;
-    const int tx = (static_cast<int>(gx) - 1) / TILE_DIM;
-    const auto ti = static_cast<std::size_t>(tz * tpa * tpa + ty * tpa + tx);
-
-    if (nv == DEAD)
-      --tile_alive_count_[ti]; // death
-    else
-      ++tile_alive_count_[ti]; // birth
-  }
-}
-
-// ── rebuild_dirty_from_changes ────────────────────────────────────────────────
-// O(D_prev + |changes| × 27) — faster than rebuild_dirty_incremental()
-// (O(D_prev × 27)) when churn is low.
-//
-// Cells can only transition in/out of the dirty set if they or one of their 26
-// neighbours changed state this generation.  We therefore:
-//  1. Re-evaluate only those "candidate" cells (changed + 26-neighbour shells).
-//  2. Use a 3-state dirty_[] encoding while processing:
-//       0 = not dirty (unchanged or removed this pass)
-//       1 = was dirty in D_prev, still dirty
-//       2 = newly dirty (was 0 in D_prev, now 1)
-//  3. Rebuild dirty_indices_ = filter(prev_dirty_indices_, flag==1) + newly-added.
-//  4. Normalise flag 2→1 so dirty_[] is clean for the next generation.
-
-void Simulation::rebuild_dirty_from_changes() noexcept
-{
-  const auto* g    = grid_.data();
-  const auto* offs = neighbor_offsets_.data();
-  const auto  N_   = static_cast<std::ptrdiff_t>(grid_dimension_);
-
-  dirty_count_ = 0;
-  dirty_indices_.clear();
-
-  // Re-evaluate one candidate cell in place; uses 0/1/2 encoding.
-  auto re_evaluate = [&](std::ptrdiff_t idx)
-  {
-    const std::ptrdiff_t gz  = idx / stride_z_;
-    const std::ptrdiff_t rem = idx - gz * stride_z_;
-    const std::ptrdiff_t gy  = rem / stride_y_;
-    const std::ptrdiff_t gx  = rem - gy * stride_y_;
-
-    // Ghost cell → redirect to the toroidal logical equivalent.
-    if (gz < 1 || gz > N_ || gy < 1 || gy > N_ || gx < 1 || gx > N_)
-    {
-      const std::ptrdiff_t lgz = (gz < 1) ? N_ : (gz > N_) ? std::ptrdiff_t(1) : gz;
-      const std::ptrdiff_t lgy = (gy < 1) ? N_ : (gy > N_) ? std::ptrdiff_t(1) : gy;
-      const std::ptrdiff_t lgx = (gx < 1) ? N_ : (gx > N_) ? std::ptrdiff_t(1) : gx;
-      idx = lgz * stride_z_ + lgy * stride_y_ + lgx;
-    }
-
-    const auto uidx     = static_cast<std::size_t>(idx);
-    const auto cur_flag = dirty_[uidx];
-    if (cur_flag == 2)
-      return; // already marked newly-dirty this pass
-
-    bool d = (g[idx] != DEAD);
-    if (!d)
-      for (int k = 0; k < 26 && !d; ++k)
-        d = (g[idx + offs[k]] != DEAD);
-
-    if (d)
-    {
-      if (cur_flag == 0)
-        dirty_[uidx] = 2; // newly dirty (was not in D_prev)
-      // else cur_flag == 1: was dirty, still dirty — leave as 1
-    }
-    else
-    {
-      dirty_[uidx] = 0; // not dirty (removes if was 1)
-    }
-  };
-
-  for (const auto& entry : changes_)
-  {
-    re_evaluate(entry.first);
-    for (int k = 0; k < 26; ++k)
-      re_evaluate(entry.first + offs[k]);
-  }
-
-  // Part 1: D_prev cells that are still dirty (flag == 1).
-  for (std::ptrdiff_t idx : prev_dirty_indices_)
-  {
-    if (dirty_[static_cast<std::size_t>(idx)] == 1)
-    {
-      dirty_indices_.push_back(idx);
-      ++dirty_count_;
-    }
-  }
-
-  // Part 2: newly-dirty cells (flag == 2); normalise 2→1 while scanning.
-  for (const auto& entry : changes_)
-  {
-    auto add_if_new = [&](std::ptrdiff_t candidate)
-    {
-      const auto uidx = static_cast<std::size_t>(candidate);
-      if (dirty_[uidx] == 2)
-      {
-        dirty_[uidx] = 1;
-        dirty_indices_.push_back(candidate);
-        ++dirty_count_;
-      }
-    };
-    add_if_new(entry.first);
-    for (int k = 0; k < 26; ++k)
-      add_if_new(entry.first + offs[k]);
-  }
-}
-
-// ── dirty_ratio helper ────────────────────────────────────────────────────────
-
-float Simulation::dirty_ratio() const noexcept
-{
-  const std::size_t N3 = static_cast<std::size_t>(grid_dimension_)
-                         * static_cast<std::size_t>(grid_dimension_)
-                         * static_cast<std::size_t>(grid_dimension_);
-  if (N3 == 0)
-    return 0.0f;
-  return static_cast<float>(dirty_count_) / static_cast<float>(N3);
-}
-
 // ── Dense step: full O(N³) sweep with AVX2 x-axis vectorisation ──────────────
 //
 // For each (z, y) row, the x-inner loop is processed 32 cells at a time
@@ -595,7 +353,7 @@ void Simulation::step_generation_dense(
                 continue;
               const __m256i nbr = _mm256_loadu_si256( // NOLINT(portability-simd-intrinsics)
                   reinterpret_cast<const __m256i*>(p + dz * s_z + dy * s_y + dx));
-              total_v           = _mm256_adds_epu8(       // NOLINT(portability-simd-intrinsics)
+              total_v           = _mm256_adds_epu8( // NOLINT(portability-simd-intrinsics)
                   total_v, _mm256_min_epu8(nbr, ones_v)); // NOLINT(portability-simd-intrinsics)
             }
 
@@ -685,10 +443,11 @@ void Simulation::step_generation_sparse(
     std::array<std::uint64_t, generator::N_SPECIES + 1>& counts) noexcept
 {
   const int   N       = grid_dimension_;
-  const int   tpa     = tiles_per_axis_;
+  const int   tpa     = tile_set_.tiles_per_axis();
   const int   n_tiles = tpa * tpa * tpa;
   const auto* offsets = neighbor_offsets_.data();
-  const auto* d_data  = dirty_.data();
+  const auto* d_data  = dirty_set_.dirty_data();
+  const auto* t_data  = tile_set_.active().data();
 
   counts.fill(0);
   changes_.clear();
@@ -707,7 +466,7 @@ void Simulation::step_generation_sparse(
     const int x0 = tx * TILE_DIM;
     const int x1 = std::min(x0 + TILE_DIM, N);
 
-    if (!tile_active_[static_cast<std::size_t>(ti)])
+    if (!t_data[static_cast<std::size_t>(ti)])
     {
       // Dormant tile: all cells are dead — propagate zeros in bulk.
       for (int z = z0; z < z1; ++z)
@@ -798,8 +557,14 @@ void Simulation::update_maxima_for_generation(
 
 void Simulation::run()
 {
-  rebuild_dirty_full();
-  rebuild_tile_set();
+  dirty_set_.rebuild_full(grid_.data());
+  tile_set_.rebuild(dirty_set_.dirty_indices());
+
+  // Simulated-annealing diagnostics: track the range of the enter_sparse
+  // threshold across the run so the adaptation is observable after run().
+  // Seeded to the base value; widened each generation when SA is active.
+  float sa_enter_min = thresholds_.enter_sparse;
+  float sa_enter_max = thresholds_.enter_sparse;
 
   for (int gen = 0; gen <= generations_; ++gen)
   {
@@ -817,19 +582,26 @@ void Simulation::run()
                                          * static_cast<std::size_t>(grid_dimension_)
                                          * static_cast<std::size_t>(grid_dimension_));
 
-    const float dr = dirty_ratio();
-    const float cr = (N3_f > 0.0f)
-                         ? static_cast<float>(changes_.size()) / N3_f
-                         : 0.0f;
+    const float dr = dirty_set_.dirty_ratio();
+    const float cr = (N3_f > 0.0f) ? static_cast<float>(changes_.size()) / N3_f : 0.0f;
+
+    // Simulated annealing: when enabled, adapt the dispatch thresholds from
+    // the chaos metric and cooling schedule before this generation's dispatch.
+    if (annealing_ctrl_)
+    {
+      thresholds_  = annealing_ctrl_->step(cr, static_cast<std::uint32_t>(gen));
+      sa_enter_min = std::min(sa_enter_min, thresholds_.enter_sparse);
+      sa_enter_max = std::max(sa_enter_max, thresholds_.enter_sparse);
+    }
 
     if (mode_ == Mode::kSparse)
     {
-      if (dr >= EXIT_SPARSE_THRESHOLD || cr >= EXIT_CHANGE_RATIO)
+      if (dr >= thresholds_.exit_sparse || cr >= thresholds_.exit_churn)
         mode_ = Mode::kDense;
     }
     else // kDense
     {
-      if (dr <= ENTER_SPARSE_THRESHOLD && cr <= ENTER_CHANGE_RATIO)
+      if (dr <= thresholds_.enter_sparse && cr <= thresholds_.enter_churn)
         mode_ = Mode::kSparse;
     }
 
@@ -844,7 +616,7 @@ void Simulation::run()
 
       grid_.swap(next_grid_);
       fill_ghost_cells(grid_);
-      rebuild_dirty_full(); // ← full rebuild always in dense mode
+      dirty_set_.rebuild_full(grid_.data()); // ← full rebuild always in dense mode
     }
     else // kSparse
     {
@@ -864,27 +636,38 @@ void Simulation::run()
       grid_.swap(next_grid_);
       fill_ghost_cells(grid_);
 
-      dirty_indices_.swap(prev_dirty_indices_);
+      dirty_set_.swap_indices();
 
       // Group 6: choose dirty-set rebuild strategy based on churn.
-      if (changes_.size() * 10 < prev_dirty_indices_.size())
-        rebuild_dirty_from_changes();
+      if (changes_.size() * 10 < dirty_set_.prev_size())
+        dirty_set_.rebuild_from_changes(grid_.data(), changes_);
       else
-        rebuild_dirty_incremental();
+        dirty_set_.rebuild_incremental(grid_.data());
     }
 
     // Groups 5+8: tile bookkeeping.
-    update_tile_counts_from_changes();
-    rebuild_tile_set();
+    tile_set_.update_counts_from_changes(changes_);
+    tile_set_.rebuild(dirty_set_.dirty_indices());
 
     update_maxima_for_generation(counts, static_cast<std::uint64_t>(gen));
   }
 
   std::fprintf(stderr,
                "mode: dense=%zu sparse=%zu dirty_thr=%.0f%%/%.0f%% churn_thr=%.0f%%/%.0f%%\n",
-               dense_gens_, sparse_gens_,
-               ENTER_SPARSE_THRESHOLD * 100.0f, EXIT_SPARSE_THRESHOLD * 100.0f,
-               ENTER_CHANGE_RATIO * 100.0f, EXIT_CHANGE_RATIO * 100.0f);
+               dense_gens_, sparse_gens_, static_cast<double>(thresholds_.enter_sparse) * 100.0,
+               static_cast<double>(thresholds_.exit_sparse) * 100.0,
+               static_cast<double>(thresholds_.enter_churn) * 100.0,
+               static_cast<double>(thresholds_.exit_churn) * 100.0);
+
+  // Simulated-annealing trace: the span of the enter_sparse threshold over the
+  // run.  Emitted only when SA is active.  max > min proves the controller
+  // adapted the threshold; equal values mean it never moved (e.g. no churn).
+  if (annealing_ctrl_)
+  {
+    std::fprintf(stderr, "sa: enter_sparse min=%.4f max=%.4f chaos=%.4f\n",
+                 static_cast<double>(sa_enter_min), static_cast<double>(sa_enter_max),
+                 static_cast<double>(annealing_ctrl_->chaos()));
+  }
 }
 
 // ── Output ────────────────────────────────────────────────────────────────────

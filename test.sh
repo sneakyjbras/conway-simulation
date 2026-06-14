@@ -174,6 +174,77 @@ check "T3 hysteresis: churn_thr=5%/10% in mode line" "yes" \
 
 echo ""
 
+# ── Phase 3: simulated-annealing threshold controller ─────────────────────────
+echo "── Simulated annealing (Phase 3) ───────────────────────────────────────"
+
+# T4: SA disabled → thresholds stable.
+# Without --sa the controller is never constructed, so thresholds_ stays at the
+# base values and no "sa:" diagnostic line is emitted.  The mode line must still
+# show the base 50%/65% dirty thresholds, and no sa: line may appear.
+T4_OFF="$("${BINARY}" 100 32 0.08 42 2>&1 1>/dev/null)"
+check "T4 SA off: mode line shows base dirty_thr=50%/65%" "yes" \
+  "$( echo "${T4_OFF}" | grep -q 'dirty_thr=50%/65%' && echo yes || echo no)"
+check "T4 SA off: no sa: diagnostic line emitted" "yes" \
+  "$( echo "${T4_OFF}" | grep -q '^sa:' && echo no || echo yes)"
+
+# T5: SA enabled → thresholds shift.
+# With --sa the controller adapts enter_sparse from the chaos metric and cooling
+# schedule.  The sa: line must appear and its max must exceed its min, proving
+# the threshold actually moved over the run.  A stronger initial temperature is
+# used so the movement is unambiguous.
+T5_ON="$("${BINARY}" 100 32 0.08 42 --sa --sa-t0 0.5 2>&1 1>/dev/null)"
+check "T5 SA on: sa: diagnostic line emitted" "yes" \
+  "$( echo "${T5_ON}" | grep -q '^sa:' && echo yes || echo no)"
+# Extract min and max enter_sparse and assert max > min via awk numeric compare.
+T5_SHIFT="$(echo "${T5_ON}" | grep '^sa:' | \
+  sed -nE 's/.*min=([0-9.]+) max=([0-9.]+).*/\1 \2/p' | \
+  awk '{ print ($2 > $1) ? "yes" : "no" }')"
+check "T5 SA on: enter_sparse threshold shifted (max > min)" "yes" "${T5_SHIFT}"
+
+# T5b: SA must not change correctness — output identical to non-SA run.
+# Dense and sparse paths are bit-identical, so adapting *when* we switch modes
+# can never change the simulation result, only performance.
+T5_BASE_OUT="$(run_sim 100 32 0.08 42)"
+T5_SA_OUT="$("${BINARY}" 100 32 0.08 42 --sa --sa-t0 3.0 --sa-cool 0.01 2>/dev/null)"
+check "T5b SA preserves correctness (output identical to non-SA)" "${T5_BASE_OUT}" "${T5_SA_OUT}"
+
+echo ""
+
+# ── Phase 4: Monte Carlo runner + CSV output ──────────────────────────────────
+echo "── Monte Carlo runner & CSV (Phase 4) ──────────────────────────────────"
+
+# T6: Monte Carlo determinism.
+# --runs N executes N independent trials but prints only the final run's
+# species maxima.  The number of trials must not change the result, so
+# --runs 3 stdout must equal the single-run stdout.
+T6_ONE="$(run_sim 10 16 0.25 42)"
+T6_THREE="$("${BINARY}" 10 16 0.25 42 --runs 3 2>/dev/null)"
+check "T6 Monte Carlo: --runs 3 stdout identical to single run" "${T6_ONE}" "${T6_THREE}"
+# stdout must be exactly 9 lines (one per species) regardless of run count.
+T6_LINES="$(echo "${T6_THREE}" | wc -l | tr -d ' ')"
+check "T6 Monte Carlo: --runs 3 prints one result block (9 lines)" "9" "${T6_LINES}"
+# timing line must report the correct run count.
+T6_TIMING="$("${BINARY}" 10 16 0.25 42 --runs 3 2>&1 1>/dev/null)"
+check "T6 Monte Carlo: timing line reports runs=3" "yes" \
+  "$( echo "${T6_TIMING}" | grep -q 'runs=3' && echo yes || echo no)"
+
+# T7: CSV output.
+# --csv writes a self-describing file: a header row, one data row per trial,
+# and a trailing summary comment.  Verify the header and row count.
+T7_CSV="/tmp/life3d_test_$$.csv"
+"${BINARY}" 10 16 0.25 42 --runs 3 --csv "${T7_CSV}" >/dev/null 2>&1
+check "T7 CSV: file created" "yes" "$( [ -f "${T7_CSV}" ] && echo yes || echo no)"
+check "T7 CSV: header row present" "yes" \
+  "$( head -1 "${T7_CSV}" | grep -q '^run,gen,N,density,seed,dist,elapsed_s,arch$' && echo yes || echo no)"
+# 3 data rows (one per trial), each ending in the arch string.
+T7_ROWS="$(grep -cE '^[0-9]+,10,16,' "${T7_CSV}" 2>/dev/null || echo 0)"
+check "T7 CSV: one data row per trial (3 rows)" "3" "${T7_ROWS}"
+check "T7 CSV: summary comment present" "yes" \
+  "$( grep -q '^# mean=' "${T7_CSV}" && echo yes || echo no)"
+rm -f "${T7_CSV}"
+
+echo ""
+
 
 echo "── Edge cases ───────────────────────────────────────────────────────────"
 

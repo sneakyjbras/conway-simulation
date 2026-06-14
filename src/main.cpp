@@ -1,19 +1,18 @@
 // main.cpp – C++23
 //
-// NOTE: std::print / std::println (P2093) requires GCC 14+ libstdc++.
-// This file uses <cstdio> + std::format (available in GCC 13) instead,
-// which is fully C++23 compliant and avoids the GCC 13 header gap.
+// Thin entry point: parse the command line, build the parameters, and hand
+// off to the Runner.  All timing and Monte Carlo logic lives in Runner; all
+// computation lives in Simulation.  main() owns neither.
 //
-// Timing uses std::chrono::steady_clock (no OpenMP dependency).
+// NOTE: std::print / std::println (P2093) requires GCC 14+ libstdc++.
+// This file uses <cstdio> + std::format (available in GCC 13) instead.
 
 #include "parser.hpp"
-#include "simulation.hpp"
+#include "runner.hpp"
 
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <format>
 #include <span>
 
 int main(int argc, char* argv[])
@@ -30,23 +29,8 @@ int main(int argc, char* argv[])
       return EXIT_FAILURE;
     }
 
-    const auto& cfg = *parsed;
-
-    Simulation simulation(
-        static_cast<int>(cfg.number_of_generations), static_cast<int>(cfg.grid_dimension),
-        static_cast<float>(cfg.initial_density), static_cast<int>(cfg.random_seed));
-
-    // Debug printing is OFF by default: printing every cell of every
-    // generation dominates runtime and is only useful on tiny grids.
-    simulation.set_debug_enabled(false);
-
-    const auto t0 = std::chrono::steady_clock::now();
-    simulation.run();
-    const auto t1      = std::chrono::steady_clock::now();
-    const auto elapsed = std::chrono::duration<double>(t1 - t0).count();
-
-    std::fprintf(stderr, "%.3fs\n", elapsed);
-    simulation.print_results();
+    Runner runner(parsed->to_params());
+    (void)runner.execute();
     return EXIT_SUCCESS;
   }
   catch (const std::exception& e)
