@@ -37,6 +37,18 @@ add_executable(life3d
 
 target_include_directories(life3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# ── Reproducible RNG ─────────────────────────────────────────────────────────
+# The initial-grid RNG (generator.cpp) does `0.5f + scale * x` in float.  Under
+# -O3 -march=native on an FMA-capable CPU the compiler contracts that into a
+# single fused-multiply-add (one rounding step), which yields bit-different
+# results from the separately-rounded form and, crucially, differs across ISAs
+# (x86 vs ARM).  That perturbs the generated grid and makes results
+# non-reproducible from machine to machine.  Pin contraction off for this one
+# translation unit so the grid — and every downstream result and golden file —
+# is identical on every platform.  (generator.cpp runs once at startup, so the
+# lost FMA has no measurable performance impact.)
+set_source_files_properties(src/generator.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+
 # ── OpenMP (timing only) ─────────────────────────────────────────────────────
 # Used solely for omp_get_wtime() in Runner.  Optional: when OpenMP is not
 # found (e.g. minimal ARM toolchains) the code falls back to

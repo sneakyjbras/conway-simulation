@@ -32,11 +32,32 @@ void init_r4uni(std::int32_t input_seed) noexcept
 
 float r4_uni() noexcept
 {
-  const std::int32_t seed_in = static_cast<std::int32_t>(g_seed);
+  const std::uint32_t seed_in = g_seed;
   g_seed ^= (g_seed << 13);
   g_seed ^= (g_seed >> 17);
   g_seed ^= (g_seed << 5);
-  return 0.5f + 0.2328306e-09f * static_cast<float>(seed_in + static_cast<std::int32_t>(g_seed));
+  // Two corrections versus a naive translation of the reference RNG, both
+  // required for cross-architecture reproducibility (see the ARM build goal):
+  //
+  //  1. The combine step adds two 32-bit values that routinely exceed
+  //     INT32_MAX.  It is done in UNSIGNED arithmetic (well-defined modular
+  //     wraparound) and then reinterpreted as int32_t; doing the add in signed
+  //     int would be undefined behaviour, which the optimiser may resolve
+  //     differently across opt-levels / grid sizes / ISAs.
+  //
+  //  2. FP CONTRACTION IS DISABLED for this translation unit (see the
+  //     set_source_files_properties(... -ffp-contract=off) entry in
+  //     CMakeLists.txt).  With contraction enabled — the -O3/-march=native
+  //     default on FMA-capable CPUs — `base + scale * x` fuses into a single
+  //     fused-multiply-add with ONE rounding step, whereas without it the
+  //     multiply and add round separately.  The two forms differ in the last
+  //     bit for some inputs, which flips a few `r4_uni() < density` draws and
+  //     silently perturbs the generated grid.  Because FMA availability differs
+  //     by ISA (x86 vs ARM) and by flags, the separately-rounded form is pinned
+  //     so the initial grid — and every downstream result — is identical on
+  //     every platform.
+  const std::uint32_t combined = seed_in + g_seed;
+  return 0.5f + 0.2328306e-09f * static_cast<float>(static_cast<std::int32_t>(combined));
 }
 
 // Pick a species label in [1, N_SPECIES] from a uniform draw.

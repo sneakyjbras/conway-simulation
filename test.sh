@@ -273,7 +273,11 @@ echo "[PASS] gen=1 N=64 completes without crash"; PASS=$((PASS+1))
 echo ""
 
 # ── Reference regression tests ────────────────────────────────────────────────
-# Expected outputs taken from a verified reference run.
+# Expected outputs from a verified reference run.  These values are now
+# architecture-independent: the initial-grid RNG is compiled with FP contraction
+# disabled (see CMakeLists.txt), so the generated grid — and therefore these
+# species maxima — are bit-identical on any IEEE-754 platform (x86 with/without
+# FMA, ARM, etc.).  The N=512 and N=1024 values were regenerated after that fix.
 # Large-grid cases (N=512, N=1024) are skipped when available RAM < threshold.
 echo "── Reference regression tests ───────────────────────────────────────────"
 
@@ -320,15 +324,15 @@ ref_check "life3d 200 128 0.5 1000" 200 128 0.5 1000 \
 MEM_KB="$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)"
 if [[ "${MEM_KB}" -ge 1048576 ]]; then   # at least 1 GB free
   ref_check "life3d 10 512 0.4 0" 10 512 0.4 0 \
-    "1 19157193 9" \
-    "2 11835204 9" \
-    "3 10389985 1" \
-    "4 9659849 1"  \
-    "5 9049679 1"  \
-    "6 8563492 1"  \
-    "7 8146692 1"  \
-    "8 7824529 1"  \
-    "9 7580100 1"
+    "1 19159668 9" \
+    "2 11835001 9" \
+    "3 10390082 1" \
+    "4 9659953 1"  \
+    "5 9049805 1"  \
+    "6 8563670 1"  \
+    "7 8146485 1"  \
+    "8 7824573 1"  \
+    "9 7579768 1"
 else
   echo "[SKIP] life3d 10 512 0.4 0 — insufficient RAM (need ≥1 GB free, have $(( MEM_KB / 1024 )) MB)"
 fi
@@ -336,15 +340,15 @@ fi
 # ── N=1024, 3 gens, d=0.4, seed=100  (memory: ~5.4 GB) ──────────────────────
 if [[ "${MEM_KB}" -ge 6291456 ]]; then   # at least 6 GB free
   ref_check "life3d 3 1024 0.4 100" 3 1024 0.4 100 \
-    "1 99923786 1"  \
-    "2 90413714 1"  \
-    "3 83137654 1"  \
-    "4 77287897 1"  \
-    "5 72448825 1"  \
-    "6 68444736 1"  \
-    "7 65198270 1"  \
-    "8 62633412 1"  \
-    "9 60611199 1"
+    "1 99924176 1"  \
+    "2 90413216 1"  \
+    "3 83138735 1"  \
+    "4 77289277 1"  \
+    "5 72447849 1"  \
+    "6 68444034 1"  \
+    "7 65197453 1"  \
+    "8 62633193 1"  \
+    "9 60610897 1"
 else
   echo "[SKIP] life3d 3 1024 0.4 100 — insufficient RAM (need ≥6 GB free, have $(( MEM_KB / 1024 )) MB)"
 fi
