@@ -6,9 +6,13 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
-if ! command -v clang-tidy >/dev/null 2>&1; then
-  echo "clang-tidy is required for the C++ linting workflow." >&2
-  echo "Install clang-tidy on your system and rerun this script." >&2
+# The concrete clang-tidy binary can be pinned via ${CLANG_TIDY} so CI runs a
+# fixed version (e.g. clang-tidy-21) independent of the runner default.
+CLANG_TIDY="${CLANG_TIDY:-clang-tidy}"
+
+if ! command -v "${CLANG_TIDY}" >/dev/null 2>&1; then
+  echo "${CLANG_TIDY} is required for the C++ linting workflow." >&2
+  echo "Install ${CLANG_TIDY} on your system and rerun this script." >&2
   exit 1
 fi
 
@@ -46,7 +50,7 @@ for source in "${SOURCES[@]}"; do
   echo
   echo "clang-tidy ${source}"
 
-  if ! clang-tidy \
+  if ! "${CLANG_TIDY}" \
     --config-file "${CLANG_TIDY_CONFIG}" \
     -p "${BUILD_DIR}" \
     --quiet \
