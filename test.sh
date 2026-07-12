@@ -85,7 +85,7 @@ dense_cases=(
 )
 for case_str in "${dense_cases[@]}"; do
   read -r gen N density seed <<< "${case_str}"
-  golden="${SCRIPT_DIR}/tests/golden_gen${gen}_N${N}_d${density}_s${seed}.txt"
+  golden="${SCRIPT_DIR}/tests/fixtures/golden_gen${gen}_N${N}_d${density}_s${seed}.txt"
   if [[ -f "${golden}" ]]; then
     expected="$(cat "${golden}")"
     actual="$(run_sim "${gen}" "${N}" "${density}" "${seed}")"
@@ -109,7 +109,7 @@ sparse_cases=(
 )
 for case_str in "${sparse_cases[@]}"; do
   read -r gen N density seed <<< "${case_str}"
-  golden="${SCRIPT_DIR}/tests/golden_gen${gen}_N${N}_d${density}_s${seed}.txt"
+  golden="${SCRIPT_DIR}/tests/fixtures/golden_gen${gen}_N${N}_d${density}_s${seed}.txt"
   if [[ -f "${golden}" ]]; then
     expected="$(cat "${golden}")"
     actual="$(run_sim "${gen}" "${N}" "${density}" "${seed}")"
