@@ -10,6 +10,20 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# ── Pinned toolchain versions ────────────────────────────────────────────────
+# The build/lint results depend on the exact compiler and clang-tools versions,
+# so we pin them explicitly instead of relying on whatever the runner ships:
+#   * LLVM_VERSION   — clang / clang++ / clang-format / clang-tidy (from apt.llvm.org)
+#   * GCC_VERSION    — g++ (from Ubuntu's toolchain packages)
+# Both provide a complete C++23 <expected> implementation. clang uses the
+# libstdc++ headers shipped with g++-${GCC_VERSION}; clang-21 defines
+# __cpp_concepts=202002L, which libstdc++'s <expected> requires (older distro
+# clangs defined 201907L, which is why the header vanished as "no template
+# named 'expected'").
+env:
+  LLVM_VERSION: "21"
+  GCC_VERSION: "14"
+
 jobs:
   build-test:
     name: build+test (${{ matrix.compiler }})
@@ -22,28 +36,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install pinned toolchain
+        run: |
+          sudo apt-get update
+          # libstdc++ (via g++-${GCC_VERSION}) is required by both compilers:
+          # gcc uses it directly, clang uses its headers for <expected> etc.
+          sudo apt-get install -y "g++-${GCC_VERSION}"
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh "${LLVM_VERSION}"
+          fi
+
       - name: Select compiler
         run: |
           if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
-            echo "CC=gcc" >> "$GITHUB_ENV"
-            echo "CXX=g++" >> "$GITHUB_ENV"
+            echo "CC=gcc-${GCC_VERSION}"   >> "$GITHUB_ENV"
+            echo "CXX=g++-${GCC_VERSION}"   >> "$GITHUB_ENV"
           else
-            echo "CC=clang" >> "$GITHUB_ENV"
-            echo "CXX=clang++" >> "$GITHUB_ENV"
+            echo "CC=clang-${LLVM_VERSION}"  >> "$GITHUB_ENV"
+            echo "CXX=clang++-${LLVM_VERSION}" >> "$GITHUB_ENV"
           fi
 
-      - name: Ensure compiler is available
+      - name: Report compiler version
         run: |
-          if [[ "${{ matrix.compiler }}" == "clang" ]] && ! command -v clang++ >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y clang
-          fi
+          echo "CC=$CC CXX=$CXX"
+          "$CXX" --version
 
       - name: Cache build directory
         uses: actions/cache@v4
         with:
           path: build
-          key: build-${{ runner.os }}-${{ matrix.compiler }}-${{ hashFiles('CMakeLists.txt', 'src/**') }}
+          key: build-${{ runner.os }}-${{ matrix.compiler }}-llvm${{ env.LLVM_VERSION }}-gcc${{ env.GCC_VERSION }}-${{ hashFiles('CMakeLists.txt', 'src/**') }}
           restore-keys: |
             build-${{ runner.os }}-${{ matrix.compiler }}-
 
@@ -76,19 +100,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install clang-format and clang-tidy
+      - name: Install pinned clang tools and libstdc++
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format clang-tidy
+          sudo apt-get install -y "g++-${GCC_VERSION}"
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "${LLVM_VERSION}"
+          sudo apt-get install -y \
+            "clang-format-${LLVM_VERSION}" \
+            "clang-tidy-${LLVM_VERSION}"
+          clang-format-${LLVM_VERSION} --version
+          clang-tidy-${LLVM_VERSION} --version
 
       - name: Configure (generate compile_commands.json)
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_COMPILER="g++-${GCC_VERSION}"
 
       - name: clang-format check
+        env:
+          CLANG_FORMAT: clang-format-${{ env.LLVM_VERSION }}
         run: ./scripts/run-clang-format.sh --check
 
       - name: clang-tidy check
+        env:
+          CLANG_TIDY: clang-tidy-${{ env.LLVM_VERSION }}
         run: ./scripts/run-clang-tidy.sh
 
   timings:
@@ -99,11 +138,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install pinned toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "g++-${GCC_VERSION}"
+          echo "CC=gcc-${GCC_VERSION}" >> "$GITHUB_ENV"
+          echo "CXX=g++-${GCC_VERSION}" >> "$GITHUB_ENV"
+
       - name: Cache build directory
         uses: actions/cache@v4
         with:
           path: build
-          key: build-${{ runner.os }}-gcc-${{ hashFiles('CMakeLists.txt', 'src/**') }}
+          key: build-${{ runner.os }}-gcc-llvm${{ env.LLVM_VERSION }}-gcc${{ env.GCC_VERSION }}-${{ hashFiles('CMakeLists.txt', 'src/**') }}
           restore-keys: |
             build-${{ runner.os }}-gcc-
 
