@@ -7,8 +7,7 @@
 
 void DebugPrinter::print_generation(std::uint64_t                     generation,
                                     const std::vector<unsigned char>& grid,
-                                    std::uint64_t                     grid_dimension,
-                                    std::uint64_t                     ghost_dim) const
+                                    std::uint64_t                     grid_dimension) const
 {
   if (!enabled_)
   {
@@ -16,7 +15,7 @@ void DebugPrinter::print_generation(std::uint64_t                     generation
   }
 
   const std::size_t N   = static_cast<std::size_t>(grid_dimension);
-  const std::size_t Ng  = static_cast<std::size_t>(ghost_dim); // N+2
+  const std::size_t Ng  = N + 2; // ghost-padded edge length
   const std::size_t Ng2 = Ng * Ng;
 
   std::fprintf(stdout, "Generation %llu  ------------------------------\n",

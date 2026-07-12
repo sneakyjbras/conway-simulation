@@ -59,13 +59,29 @@ template auto CommandLineParser::parse_scalar<std::int32_t>(std::string_view, st
 
 auto CommandLineParser::usage_message() -> std::string_view
 {
-  return "Usage: <program> <generations> <grid_dimension> <density> <seed>";
+  return "Usage: <program> <generations> <grid_dimension> <density> <seed>\n"
+         "  Optional flags (defaults in brackets):\n"
+         "    --runs N             Monte Carlo trials [1]\n"
+         "    --csv PATH           write timing CSV [none]\n"
+         "    --export-frames PATH write central-z-slice frame-log for visualize.py [none]\n"
+         "    --dist uniform|gauss initial distribution [uniform]\n"
+         "    --enter-sparse F     dirty-ratio enter threshold [0.50]\n"
+         "    --exit-sparse F      dirty-ratio exit threshold [0.65]\n"
+         "    --enter-churn F      change-ratio enter threshold [0.05]\n"
+         "    --exit-churn F       change-ratio exit threshold [0.10]\n"
+         "    --uniform-factor F   uniform scratch reserve factor [1.5]\n"
+         "    --gauss-factor F     gaussian scratch reserve factor [3.0]\n"
+         "    --sa                 enable simulated-annealing thresholds [off]\n"
+         "    --sa-t0 F            annealing initial temperature [0.10]\n"
+         "    --sa-tf F            annealing final temperature [0.001]\n"
+         "    --sa-cool F          annealing cooling rate [0.05]\n"
+         "    --sa-window N        annealing EMA window [10]";
 }
 
 auto CommandLineParser::parse(std::span<char* const> raw_arguments)
     -> std::expected<SimulationConfig, std::string>
 {
-  if (raw_arguments.size() != static_cast<std::size_t>(kExpectedArgumentCount))
+  if (raw_arguments.size() < static_cast<std::size_t>(kMinimumArgumentCount))
   {
     return std::unexpected(std::string{usage_message()});
   }
@@ -120,10 +136,116 @@ auto CommandLineParser::parse(std::span<char* const> raw_arguments)
     return std::unexpected("<density> must be finite and in [0, 1]");
   }
 
-  return SimulationConfig{
-      .number_of_generations = number_of_generations,
-      .grid_dimension        = grid_dimension,
-      .initial_density       = initial_density,
-      .random_seed           = random_seed,
+  SimulationConfig config{};
+  config.number_of_generations = number_of_generations;
+  config.grid_dimension        = grid_dimension;
+  config.initial_density       = initial_density;
+  config.random_seed           = random_seed;
+
+  // ── Optional flags ────────────────────────────────────────────────────────
+  // Parsed positionally after the four required arguments.  A flag taking a
+  // value consumes the next token; unknown flags are an error.
+  const std::size_t first_optional = static_cast<std::size_t>(kMinimumArgumentCount);
+
+  auto need_value = [&](std::size_t      i,
+                        std::string_view flag) -> std::expected<std::string_view, std::string>
+  {
+    if (i + 1 >= raw_arguments.size())
+      return std::unexpected(std::string{flag} + " requires a value");
+    return std::string_view{raw_arguments[i + 1]};
   };
+
+  for (std::size_t i = first_optional; i < raw_arguments.size(); ++i)
+  {
+    const std::string_view flag{raw_arguments[i]};
+
+    auto take_float = [&](float& dst) -> std::expected<void, std::string>
+    {
+      auto v = need_value(i, flag);
+      if (!v)
+        return std::unexpected(v.error());
+      auto parsed = parse_scalar<float>(*v);
+      if (!parsed)
+        return std::unexpected(std::string{flag} + ": " + parsed.error());
+      dst = *parsed;
+      ++i;
+      return {};
+    };
+
+    auto take_uint = [&](std::uint32_t& dst) -> std::expected<void, std::string>
+    {
+      auto v = need_value(i, flag);
+      if (!v)
+        return std::unexpected(v.error());
+      auto parsed = parse_scalar<std::uint64_t>(*v);
+      if (!parsed)
+        return std::unexpected(std::string{flag} + ": " + parsed.error());
+      dst = static_cast<std::uint32_t>(*parsed);
+      ++i;
+      return {};
+    };
+
+    std::expected<void, std::string> result{};
+
+    if (flag == "--runs")
+      result = take_uint(config.runs);
+    else if (flag == "--csv")
+    {
+      auto v = need_value(i, flag);
+      if (!v)
+        return std::unexpected(v.error());
+      config.csv_path = std::string{*v};
+      ++i;
+    }
+    else if (flag == "--export-frames")
+    {
+      auto v = need_value(i, flag);
+      if (!v)
+        return std::unexpected(v.error());
+      config.export_frames_path = std::string{*v};
+      ++i;
+    }
+    else if (flag == "--dist")
+    {
+      auto v = need_value(i, flag);
+      if (!v)
+        return std::unexpected(v.error());
+      if (*v == "uniform")
+        config.distribution = DistributionType::kUniform;
+      else if (*v == "gauss" || *v == "gaussian")
+        config.distribution = DistributionType::kGaussian;
+      else
+        return std::unexpected(std::string{"--dist must be uniform or gauss"});
+      ++i;
+    }
+    else if (flag == "--enter-sparse")
+      result = take_float(config.thresholds.enter_sparse);
+    else if (flag == "--exit-sparse")
+      result = take_float(config.thresholds.exit_sparse);
+    else if (flag == "--enter-churn")
+      result = take_float(config.thresholds.enter_churn);
+    else if (flag == "--exit-churn")
+      result = take_float(config.thresholds.exit_churn);
+    else if (flag == "--uniform-factor")
+      result = take_float(config.alloc.uniform_reserve_factor);
+    else if (flag == "--gauss-factor")
+      result = take_float(config.alloc.gaussian_reserve_factor);
+    else if (flag == "--sa")
+      config.annealing.enabled = true;
+    else if (flag == "--sa-t0")
+      result = take_float(config.annealing.t_initial);
+    else if (flag == "--sa-tf")
+      result = take_float(config.annealing.t_final);
+    else if (flag == "--sa-cool")
+      result = take_float(config.annealing.cooling_rate);
+    else if (flag == "--sa-window")
+      result = take_uint(config.annealing.window_size);
+    else
+      return std::unexpected(std::string{"Unknown flag: "} + std::string{flag});
+
+    if (!result)
+      return std::unexpected(result.error());
+  }
+
+  return config;
 }

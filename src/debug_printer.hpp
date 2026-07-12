@@ -22,12 +22,11 @@ public:
   }
 
   // Print all z-layers of one generation.
-  // `ghost_dim` is N+2 (the ghost-padded edge length).
-  // Actual cells occupy indices [1..N] on every axis.
+  // The ghost-padded edge length (N+2) is derived internally from
+  // grid_dimension; actual cells occupy indices [1..N] on every axis.
   void print_generation(std::uint64_t                     generation,
                         const std::vector<unsigned char>& grid,
-                        std::uint64_t                     grid_dimension,
-                        std::uint64_t                     ghost_dim) const;
+                        std::uint64_t                     grid_dimension) const;
 
 private:
   bool enabled_{false};

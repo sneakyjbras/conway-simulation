@@ -34,11 +34,39 @@ if [[ ${#SOURCES[@]} -eq 0 ]]; then
   exit 0
 fi
 
+# ── clang / libstdc++ <expected> workaround ─────────────────────────────────
+EXTRA_ARGS=(
+  "--extra-arg=-D__cpp_concepts=202002L"
+  "--extra-arg=-Wno-builtin-macro-redefined"
+)
+
+FAILED_SOURCES=()
+
 for source in "${SOURCES[@]}"; do
+  echo
   echo "clang-tidy ${source}"
-  clang-tidy \
+
+  if ! clang-tidy \
     --config-file "${CLANG_TIDY_CONFIG}" \
     -p "${BUILD_DIR}" \
     --quiet \
-    "${source}"
+    "${EXTRA_ARGS[@]}" \
+    "${source}"; then
+
+    FAILED_SOURCES+=("${source}")
+  fi
 done
+
+echo
+
+if [[ ${#FAILED_SOURCES[@]} -ne 0 ]]; then
+  echo "clang-tidy failed for ${#FAILED_SOURCES[@]} file(s):" >&2
+
+  for source in "${FAILED_SOURCES[@]}"; do
+    echo "  - ${source}" >&2
+  done
+
+  exit 1
+fi
+
+echo "clang-tidy passed for all ${#SOURCES[@]} file(s)."

@@ -38,18 +38,34 @@
 //      kDense  → step_generation_dense()
 //      kSparse → step_generation_sparse()
 
+#include "annealing.hpp"
 #include "debug_printer.hpp"
+#include "dirty_set.hpp"
 #include "generator.hpp"
+#include "grid_types.hpp"
+#include "params.hpp"
+#include "tile_set.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 class Simulation
 {
 public:
-  Simulation(int number_of_generations, int grid_dimension, float initial_density, int random_seed);
+  explicit Simulation(const SimulationParams& params);
+
+  // Movable (transfers all owned buffers and the optional annealing
+  // controller); copying is disabled because the grids can be large and
+  // accidental deep copies would be costly.  unique_ptr makes the class
+  // move-only by default, so these are spelled out for clarity.
+  Simulation(Simulation&&) noexcept            = default;
+  Simulation& operator=(Simulation&&) noexcept = default;
+  Simulation(const Simulation&)                = delete;
+  Simulation& operator=(const Simulation&)     = delete;
+  ~Simulation()                                = default;
 
   void run();
   void print_results() const;
@@ -71,14 +87,9 @@ public:
 
 private:
   // ── Tuning constants ────────────────────────────────────────────────────
-  static constexpr float ENTER_SPARSE_THRESHOLD = 0.50f; // dirty_ratio to enter sparse
-  static constexpr float EXIT_SPARSE_THRESHOLD  = 0.65f; // dirty_ratio to exit  sparse
-  static constexpr float ENTER_CHANGE_RATIO     = 0.05f; // change_ratio to enter sparse
-  static constexpr float EXIT_CHANGE_RATIO      = 0.10f; // change_ratio to exit  sparse
-
-  // Edge length of each cubic tile (cells per axis).
-  // 8³ = 512 cells per tile; fits comfortably in L1/L2 cache.
-  static constexpr int TILE_DIM = 8;
+  // Dispatch thresholds are now runtime state (see thresholds_ below) so the
+  // annealing controller can adjust them per generation.  TILE_DIM lives in
+  // grid_types.hpp, shared with the TileSet.
 
   // ── Ghost-cell helpers ──────────────────────────────────────────────────
   [[nodiscard]] std::size_t ghost_idx(int gx, int gy, int gz) const noexcept;
@@ -99,14 +110,8 @@ private:
                               std::vector<unsigned char>&                          next,
                               std::array<std::uint64_t, generator::N_SPECIES + 1>& counts) noexcept;
 
-  // ── Dirty-set maintenance ───────────────────────────────────────────────
-  [[nodiscard]] float dirty_ratio() const noexcept;
-  void                rebuild_dirty_full() noexcept;
-  void                rebuild_dirty_incremental() noexcept;
-  void                rebuild_tile_set() noexcept;
-  void                rebuild_dirty_from_changes() noexcept;
-  void                update_tile_counts_from_changes() noexcept;
-  void                compute_initial_counts() noexcept;
+  // ── Species-count maintenance ───────────────────────────────────────────
+  void compute_initial_counts() noexcept;
 
   // ── Maxima tracking ─────────────────────────────────────────────────────
   void
@@ -120,45 +125,61 @@ private:
   float        density_;
   std::int32_t seed_;
 
+  // ── Runtime configuration ───────────────────────────────────────────────
+  // Dispatch thresholds are mutable so the annealing controller can shift them
+  // per generation.  Distribution and alloc config drive scratch reservation.
+  DispatchThresholds thresholds_;
+  AllocConfig        alloc_;
+  DistributionType   distribution_;
+
+  // Visualization frame-log path (from SimulationParams). Empty → no export.
+  // Consumed only in run(); the FrameExporter itself lives as a function-local
+  // std::optional so a non-exporting run constructs nothing.
+  std::string export_frames_path_;
+
+  // ── Simulated-annealing controller ──────────────────────────────────────
+  // Held via unique_ptr: present only when annealing is enabled, null
+  // otherwise.  When null, the static thresholds_ are used unchanged
+  // (bit-identical to the pre-annealing dispatch path).  This is the idiomatic
+  // owning handle for an optional sub-system and keeps Simulation move-only.
+  AnnealingParams                      annealing_params_;
+  std::unique_ptr<AnnealingController> annealing_ctrl_;
+
   std::ptrdiff_t stride_y_; // ghost_dim_
   std::ptrdiff_t stride_z_; // ghost_dim_ * ghost_dim_
 
   std::array<std::ptrdiff_t, 26> neighbor_offsets_;
 
+  // Read-only geometry snapshot shared with the dirty-set and tile-set.
+  GridGeometry geom_;
+
   std::vector<unsigned char> grid_;
   std::vector<unsigned char> next_grid_;
 
-  // ── Dirty-set state ─────────────────────────────────────────────────────
-  std::vector<std::uint8_t> dirty_;
-  std::size_t               dirty_count_{0};
-
-  // ── Activity list ─────────────────────────────────────────────────────────
-  // Flat ghost-array indices of all dirty cells, maintained alongside dirty_[].
-  // Swapped with prev_dirty_indices_ at the start of each sparse rebuild pass.
-  std::vector<std::ptrdiff_t> dirty_indices_;
-  std::vector<std::ptrdiff_t> prev_dirty_indices_;
+  // ── Grid sub-objects ────────────────────────────────────────────────────
+  // DirtySet owns the activity tracking (dirty byte map + index lists and the
+  // three rebuild strategies).  TileSet owns the coarse tile active-set and
+  // per-tile alive counts.  Both hold geometry by value and receive the grid
+  // buffer per call, so Simulation remains movable.
+  DirtySet dirty_set_;
+  TileSet  tile_set_;
 
   // ── Changes vector ─────────────────────────────────────────────────────────
   // Populated only during step_generation_sparse(). Each entry is
   // {flat_ghost_idx, new_value} for cells whose value actually changed this step.
   // Empty after dense steps.
-  std::vector<std::pair<std::ptrdiff_t, unsigned char>> changes_;
+  ChangesVector changes_;
 
   // ── Running species counts ─────────────────────────────────────────────────
   // Maintained incrementally in sparse mode; resynced from step output in dense mode.
   std::array<std::uint64_t, generator::N_SPECIES + 1> current_counts_{};
 
-  // ── Tile alive counts ──────────────────────────────────────────────────────
-  // Number of alive cells inside each tile; same flat indexing as tile_active_.
-  // Updated incrementally from changes_ in sparse mode.
-  std::vector<std::uint32_t> tile_alive_count_;
-
-  // ── Tile active-set ─────────────────────────────────────────────────────
-  int                       tiles_per_axis_{0};
-  std::vector<std::uint8_t> tile_active_;
-
   // ── Mode state ────────────────────────────────────────────────────────────
-  enum class Mode : std::uint8_t { kDense, kSparse };
+  enum class Mode : std::uint8_t
+  {
+    kDense,
+    kSparse
+  };
   Mode mode_{Mode::kDense};
 
   // ── Maxima ──────────────────────────────────────────────────────────────

@@ -1,0 +1,16 @@
+# Python dependencies for the life3d tooling.
+#
+# The parameter sweep (tune.py) runs on the standard library alone — it shells
+# out to the compiled binary and parses the CSV summary with `re`.
+#
+# The visualizer (visualize.py) is ALSO standard-library only: it reads the
+# binary frame-log emitted by `life3d --export-frames PATH` and writes a
+# self-contained HTML scrubber.  No install step is required to use it.
+#
+# pandas is optional and only used for richer post-hoc analysis of the ranking
+# CSV (sorting, grouping by architecture, plotting).  Install it if you want to
+# load sweep_results.csv into a DataFrame:
+#
+#     pip install -r scripts/requirements.txt
+#
+pandas>=2.0
