@@ -27,6 +27,9 @@ add_executable(life3d
   src/main.cpp
   src/parser.cpp
   src/simulation.cpp
+  src/simulation_init.cpp
+  src/simulation_step.cpp
+  src/frame_exporter.cpp
   src/generator.cpp
   src/debug_printer.cpp
   src/annealing.cpp

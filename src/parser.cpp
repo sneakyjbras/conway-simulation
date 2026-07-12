@@ -63,6 +63,7 @@ auto CommandLineParser::usage_message() -> std::string_view
          "  Optional flags (defaults in brackets):\n"
          "    --runs N             Monte Carlo trials [1]\n"
          "    --csv PATH           write timing CSV [none]\n"
+         "    --export-frames PATH write central-z-slice frame-log for visualize.py [none]\n"
          "    --dist uniform|gauss initial distribution [uniform]\n"
          "    --enter-sparse F     dirty-ratio enter threshold [0.50]\n"
          "    --exit-sparse F      dirty-ratio exit threshold [0.65]\n"
@@ -194,6 +195,14 @@ auto CommandLineParser::parse(std::span<char* const> raw_arguments)
       if (!v)
         return std::unexpected(v.error());
       config.csv_path = std::string{*v};
+      ++i;
+    }
+    else if (flag == "--export-frames")
+    {
+      auto v = need_value(i, flag);
+      if (!v)
+        return std::unexpected(v.error());
+      config.export_frames_path = std::string{*v};
       ++i;
     }
     else if (flag == "--dist")

@@ -172,6 +172,16 @@ check "T3 hysteresis: dirty_thr=50%/65% in mode line" "yes" \
 check "T3 hysteresis: churn_thr=5%/10% in mode line" "yes" \
   "$( echo "${T3_MODE}" | grep -q 'churn_thr=5%/10%' && echo yes || echo no)"
 
+# T8: Branchless rewrite — dense/sparse equivalence at HIGH density.
+# The branchless hot-loop rewrite (survival via unsigned range mask, birth
+# behind an unlikely branch, unconditional sp[v]++) must change no cell.  d=0.4
+# is the density where `cur != DEAD` is ~50/50 — exactly where a faulty mask
+# would diverge.  Forcing all-dense vs all-sparse exercises both rewritten
+# kernels on the same grid; their output must be byte-identical.
+T8_DENSE="$("${BINARY}" 50 32 0.4 7 --enter-sparse 0.0 --enter-churn 0.0 2>/dev/null)"
+T8_SPARSE="$("${BINARY}" 50 32 0.4 7 --exit-sparse 1.1 --exit-churn 1.1 2>/dev/null)"
+check "T8 branchless dense==sparse at d=0.4 (gen=50 N=32 seed=7)" "${T8_DENSE}" "${T8_SPARSE}"
+
 echo ""
 
 # ── Phase 3: simulated-annealing threshold controller ─────────────────────────

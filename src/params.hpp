@@ -118,4 +118,9 @@ struct SimulationParams
   // Monte Carlo / output options (consumed by Runner, not Simulation).
   std::uint32_t runs{1};    // number of independent timed trials
   std::string   csv_path{}; // empty → no CSV written
+
+  // Visualization (consumed by Simulation::run).  When non-empty, each
+  // generation's central z-slice is appended to this binary frame-log for
+  // offline rendering by scripts/visualize.py.  Empty → no export, zero cost.
+  std::string export_frames_path{};
 };

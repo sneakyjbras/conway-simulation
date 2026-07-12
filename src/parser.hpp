@@ -27,6 +27,7 @@ struct SimulationConfig
   AnnealingParams    annealing{};
   std::uint32_t      runs{1};
   std::string        csv_path{};
+  std::string        export_frames_path{};
 
   // Assemble the full SimulationParams from this parsed config.
   [[nodiscard]] SimulationParams to_params() const
@@ -42,6 +43,7 @@ struct SimulationConfig
     p.annealing              = annealing;
     p.runs                   = runs;
     p.csv_path               = csv_path;
+    p.export_frames_path     = export_frames_path;
     return p;
   }
 };

@@ -132,6 +132,11 @@ private:
   AllocConfig        alloc_;
   DistributionType   distribution_;
 
+  // Visualization frame-log path (from SimulationParams). Empty → no export.
+  // Consumed only in run(); the FrameExporter itself lives as a function-local
+  // std::optional so a non-exporting run constructs nothing.
+  std::string export_frames_path_;
+
   // ── Simulated-annealing controller ──────────────────────────────────────
   // Held via unique_ptr: present only when annealing is enabled, null
   // otherwise.  When null, the static thresholds_ are used unchanged
