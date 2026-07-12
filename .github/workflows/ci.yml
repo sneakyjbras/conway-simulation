@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build+test (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select compiler
+        run: |
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          else
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Ensure compiler is available
+        run: |
+          if [[ "${{ matrix.compiler }}" == "clang" ]] && ! command -v clang++ >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang
+          fi
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ runner.os }}-${{ matrix.compiler }}-${{ hashFiles('CMakeLists.txt', 'src/**') }}
+          restore-keys: |
+            build-${{ runner.os }}-${{ matrix.compiler }}-
+
+      - name: Build (Release)
+        run: ./build.sh --type Release
+
+      - name: Run ctest (life3d_tests) - informational only
+        id: ctest
+        continue-on-error: true
+        run: |
+          if [[ -d build ]]; then
+            ctest --test-dir build --output-on-failure
+          else
+            echo "build/ directory not found; skipping ctest."
+            exit 1
+          fi
+
+      - name: Note ctest outcome
+        if: steps.ctest.outcome == 'failure'
+        run: |
+          echo "::warning::ctest reported no tests or a failure (expected until issue #19 adds the life3d_tests target). This does not fail the pipeline; ./test.sh remains the hard gate."
+
+      - name: Run correctness tests (./test.sh)
+        run: ./test.sh
+
+  lint:
+    name: lint (clang-format + clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format and clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format clang-tidy
+
+      - name: Configure (generate compile_commands.json)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: clang-format check
+        run: ./scripts/run-clang-format.sh --check
+
+      - name: clang-tidy check
+        run: ./scripts/run-clang-tidy.sh
+
+  timings:
+    name: timings (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: build-${{ runner.os }}-gcc-${{ hashFiles('CMakeLists.txt', 'src/**') }}
+          restore-keys: |
+            build-${{ runner.os }}-gcc-
+
+      - name: Build (Release)
+        run: ./build.sh --type Release
+
+      - name: Run benchmarks and record timings
+        run: |
+          {
+            echo "## Latest timings (life3d, $(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            echo ""
+            echo "Runner: $(nproc) cores, $(uname -m)"
+            echo ""
+            echo '```'
+            ./test.sh --bench
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
