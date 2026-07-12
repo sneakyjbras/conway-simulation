@@ -22,9 +22,12 @@ add_compile_options(
   $<$<COMPILE_LANGUAGE:CXX>:-fno-math-errno>
 )
 
-# ── Sources ───────────────────────────────────────────────────────────────────
-add_executable(life3d
-  src/main.cpp
+# ── Core library ─────────────────────────────────────────────────────────────
+# Every translation unit except main.cpp lives in a reusable static library so
+# both the CLI executable and the GoogleTest harness can link the exact same
+# object code and call the simulation's functions directly (no subprocess for
+# library-level behaviour).
+add_library(life3d_core STATIC
   src/parser.cpp
   src/simulation.cpp
   src/simulation_init.cpp
@@ -38,7 +41,8 @@ add_executable(life3d
   src/tile_set.cpp
 )
 
-target_include_directories(life3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# PUBLIC so both the executable and the test target inherit the include path.
+target_include_directories(life3d_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # ── Reproducible RNG ─────────────────────────────────────────────────────────
 # The initial-grid RNG (generator.cpp) does `0.5f + scale * x` in float.  Under
@@ -58,11 +62,25 @@ set_source_files_properties(src/generator.cpp PROPERTIES COMPILE_OPTIONS "-ffp-c
 # std::chrono::steady_clock via the _OPENMP guard, so the build still succeeds.
 find_package(OpenMP QUIET COMPONENTS CXX)
 if(OpenMP_CXX_FOUND)
-  target_link_libraries(life3d PRIVATE OpenMP::OpenMP_CXX)
+  target_link_libraries(life3d_core PUBLIC OpenMP::OpenMP_CXX)
   message(STATUS "OpenMP found — using omp_get_wtime() for timing")
 else()
   message(STATUS "OpenMP not found — falling back to std::chrono for timing")
 endif()
 
+# ── CLI executable ───────────────────────────────────────────────────────────
+add_executable(life3d src/main.cpp)
+target_link_libraries(life3d PRIVATE life3d_core)
+
 # Export compile commands so clang-tidy / clangd work out of the box.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# ── Tests (GoogleTest) ───────────────────────────────────────────────────────
+# BUILD_TESTING is the standard CTest switch (default ON).  A normal
+# `./build.sh` still produces the life3d binary; the test wiring only adds an
+# extra target.  Pass -DBUILD_TESTING=OFF to skip the GoogleTest download and
+# the test target entirely (e.g. for offline builds).
+include(CTest)
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
