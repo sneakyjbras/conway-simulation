@@ -16,6 +16,10 @@ Thumbs.db
 .venv/
 venv/
 
+# --- Python bytecode caches ---
+__pycache__/
+*.pyc
+
 # --- Build directories (out-of-source CMake builds) ---
 /build/
 /build-* /cmake-build-*/
